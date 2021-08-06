@@ -1,0 +1,13 @@
+group = "client.guardian.algo"
+version = "1.0.0"
+
+dependencies {
+    compile scalaCross("org.typelevel:cats-core:2.6.1")
+    compile scalaCross("org.typelevel:cats-effect:3.2.1")
+    testCompile scalaCross("org.scalatest:scalatest:3.2.9")
+    testRuntimeOnly "com.vladsch.flexmark:flexmark-all:0.35.10"
+}
+
+task wrapper(type: Wrapper){
+    gradleVersion = '4.1.2'
+}
