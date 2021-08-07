@@ -12,6 +12,7 @@ import java.util.UUID
 import scala.annotation.tailrec
 import scala.collection.mutable.ListBuffer
 import scala.language.higherKinds
+import guardian.Algo._
 
 class Algo[F[_]: Monad](
             val liveOrdersRepo: LiveOrdersRepoAlgebra[F],
@@ -77,14 +78,7 @@ class Algo[F[_]: Monad](
     }
   }
 
-  def createOrder(qty: Long, prc: Double, buysell: Int, id: String): Order = {
-    val o = new Order()
-    o.setQuantity(qty)
-    o.setPrice(prc)
-    o.setBuySell(buysell)
-    o.setId(id)
-    o
-  }
+
 
   @tailrec
   final def trimLiveOrders(
@@ -116,4 +110,15 @@ class Algo[F[_]: Monad](
     }
 
 
+}
+
+object Algo{
+  def createOrder(qty: Long, prc: Double, buysell: Int, id: String): Order = {
+    val o = new Order()
+    o.setQuantity(qty)
+    o.setPrice(prc)
+    o.setBuySell(buysell)
+    o.setId(id)
+    o
+  }
 }

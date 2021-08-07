@@ -3,41 +3,17 @@ package guardian
 import cats.implicits._
 import cats.{Id, Monad}
 import com.ingalys.imc.BuySell
-import com.ingalys.imc.order.Order
 import guardian.Entities.OrderAction.{CancelOrder, UpdateOrder}
+import guardian.Shared.createOrder
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers.convertToAnyShouldWrapper
 
 import scala.collection.mutable.ListBuffer
 import scala.language.{higherKinds, postfixOps}
-import scala.math.BigDecimal.RoundingMode
 
 class AlgoTest extends AnyFlatSpec {
 
-  //  behavior of "accumulateActiveOrders"
-
-  //  it should "accumulate orders' quantities" in {
-  //    val x = for {
-  //      a <- Monad[Option].pure {
-  //        val x = new LiveOrdersInMemInterpreter[Option]
-  //        x.putOrder("aaa", Order("id1", 10L, 100, 50, Entities.BUY))
-  //        x.putOrder("aaa", Order("id2", 11L, 20, 50, Entities.BUY))
-  //        x
-  //      }
-  //      b <- Monad[Option].pure {
-  //        new Application[Option](a)
-  //      }
-  //      c <- b.accumulateLiveOrders("aaa")
-  //    } yield c
-  //    x shouldBe Some(120)
-  //  }
-
-  // if new order's direction is different then Cancel ALL Live Orders
-  // if live orders are empty or new quantity is bigger than accumulate live orders' quantity then Insert
-  // else / if 0 < new quantity < accumulated liver orders' quantity then CancelOrder or UpdateOrder
-
   val symbol = "ptt"
-
 
   behavior of "trimLiveOrders"
 
@@ -49,21 +25,8 @@ class AlgoTest extends AnyFlatSpec {
       new Algo[F](a, b, c, d, symbol)
   }
 
-//  def createApp[F[_]: Monad](symbol: String, lives: List[Order]) = {
-//    val x = createApp[F](symbol)
-//    lives.foreach(x.liveOrdersRepo.putOrder(symbol, _))
-//
-//  }
 
-  def createOrder(id: String, nanos: Long, qty: Long, price: Double, buySell: Int): Order = {
-    val x = new Order()
-    x.setId(id)
-    x.setTimestampNanos(nanos) // assume we are the exchange who can assign timestamp
-    x.setQuantity(qty)
-    x.setPrice(price)
-    x.setBuySell(buySell)
-    x
-  }
+
 
   it should "create 1 UpdateOrder if calQty between o2 and o3 in [o1, o2, o3]" in {
     val calQty = 135L
