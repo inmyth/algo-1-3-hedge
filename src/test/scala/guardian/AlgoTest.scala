@@ -9,7 +9,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers.convertToAnyShouldWrapper
 
 import scala.collection.mutable.ListBuffer
-import scala.language.postfixOps
+import scala.language.{higherKinds, postfixOps}
 import scala.math.BigDecimal.RoundingMode
 
 class AlgoTest extends AnyFlatSpec {
@@ -41,27 +41,19 @@ class AlgoTest extends AnyFlatSpec {
 
   behavior of "trimLiveOrders"
 
-  def createApp[F[_]: Monad](symbol: String, liveOrders: List[Order]): F[Algo[F]] =
-    for {
-      a <- Monad[F].pure {
-        val x = new LiveOrdersInMemInterpreter[F]
-        liveOrders.foreach(x.putOrder(symbol, _))
-        x
-      }
-      b <- Monad[F].pure {
-        new UnderlyingPortfolioInterpreter[F]
-      }
-      c <- Monad[F].pure {
-        new PendingOrdersInMemInterpreter[F]
-      }
-      d <- Monad[F].pure {
-        new PendingCalculationInMemInterpreter[F]
-      }
-      z <- Monad[F].pure {
-        new Algo[F](a, b, c, d, symbol)
-      }
-    } yield z
+  def createApp[F[_]: Monad](symbol: String): Algo[F] = {
+      val a = new LiveOrdersInMemInterpreter[F]
+      val b = new UnderlyingPortfolioInterpreter[F]
+      val c = new PendingOrdersInMemInterpreter[F]
+      val d = new PendingCalculationInMemInterpreter[F]
+      new Algo[F](a, b, c, d, symbol)
+  }
 
+//  def createApp[F[_]: Monad](symbol: String, lives: List[Order]) = {
+//    val x = createApp[F](symbol)
+//    lives.foreach(x.liveOrdersRepo.putOrder(symbol, _))
+//
+//  }
 
   def createOrder(id: String, nanos: Long, qty: Long, price: Double, buySell: Int): Order = {
     val x = new Order()
@@ -84,14 +76,14 @@ class AlgoTest extends AnyFlatSpec {
       createOrder("id3", 12L, q3, 50.0, BuySell.BUY)
     )
     val x = for {
-      a <- createApp[Option](symbol, liveOrders)
-      b <- a.liveOrdersRepo.getOrdersByTimeSortedDown(symbol)
-      _ = println(b)
-      c <- a.trimLiveOrders(b, calQty, ListBuffer.empty)
+      a <- Monad[Id].pure(createApp[Id](symbol))
+      _ = liveOrders.foreach(a.liveOrdersRepo.putOrder(symbol, _))
+      b = a.liveOrdersRepo.getOrdersByTimeSortedDown(symbol)
+      c = a.trimLiveOrders(b, calQty, ListBuffer.empty)
     } yield c
-    x.get.size shouldBe 1
-    x.get.head.isInstanceOf[UpdateOrder] shouldBe true
-    val y = x.get.head.asInstanceOf[UpdateOrder]
+    x.size shouldBe 1
+    x.head.isInstanceOf[UpdateOrder] shouldBe true
+    val y = x.head.asInstanceOf[UpdateOrder]
     y.order.getQuantityD shouldBe (calQty - q1 - q2)
   }
 
@@ -104,13 +96,14 @@ class AlgoTest extends AnyFlatSpec {
       createOrder(lastId, 12L, 10L, 50.0, BuySell.BUY)
     )
     val x = for {
-      a <- createApp[Option](symbol, liveOrders)
-      b <- a.liveOrdersRepo.getOrdersByTimeSortedDown(symbol)
-      c <- a.trimLiveOrders(b, calQty, ListBuffer.empty)
+      a <- Monad[Id].pure(createApp[Id](symbol))
+      _ = liveOrders.foreach(a.liveOrdersRepo.putOrder(symbol, _))
+      b = a.liveOrdersRepo.getOrdersByTimeSortedDown(symbol)
+      c = a.trimLiveOrders(b, calQty, ListBuffer.empty)
     } yield c
-    x.get.size shouldBe 1
-    x.get.head.isInstanceOf[CancelOrder] shouldBe true
-    x.get.head.asInstanceOf[CancelOrder].id shouldBe lastId
+    x.size shouldBe 1
+    x.head.isInstanceOf[CancelOrder] shouldBe true
+    x.head.asInstanceOf[CancelOrder].id shouldBe lastId
   }
 
   it should "create two CancelOrder if calQty is equal to o1 in [o1, o2, o3]" in {
@@ -123,14 +116,15 @@ class AlgoTest extends AnyFlatSpec {
       createOrder(lastId, 12L, 10L, 50.0, BuySell.BUY)
     )
     val x = for {
-      a <- createApp[Option](symbol, liveOrders)
-      b <- a.liveOrdersRepo.getOrdersByTimeSortedDown(symbol)
-      c <- a.trimLiveOrders(b, calQty, ListBuffer.empty)
+      a <- Monad[Id].pure(createApp[Id](symbol))
+      _ = liveOrders.foreach(a.liveOrdersRepo.putOrder(symbol, _))
+      b = a.liveOrdersRepo.getOrdersByTimeSortedDown(symbol)
+      c = a.trimLiveOrders(b, calQty, ListBuffer.empty)
     } yield c
-    x.get.size shouldBe 2
-    x.get.count(_.isInstanceOf[CancelOrder]) shouldBe 2
-    x.get.head.asInstanceOf[CancelOrder].id shouldBe lastId
-    x.get(1).asInstanceOf[CancelOrder].id shouldBe id2
+    x.size shouldBe 2
+    x.count(_.isInstanceOf[CancelOrder]) shouldBe 2
+    x.head.asInstanceOf[CancelOrder].id shouldBe lastId
+    x(1).asInstanceOf[CancelOrder].id shouldBe id2
   }
 
   it should "create 2 CancelOrders and 1 UpdateOrder if calQty is between 0 and o1 in [o1, o2, o3] " in {
@@ -142,15 +136,16 @@ class AlgoTest extends AnyFlatSpec {
       createOrder("id3", 12L, 10L, 50.0, BuySell.BUY)
     )
     val x = for {
-      a <- createApp[Option](symbol, liveOrders)
-      b <- a.liveOrdersRepo.getOrdersByTimeSortedDown(symbol)
-      c <- a.trimLiveOrders(b, calQty, ListBuffer.empty)
+      a <- Monad[Id].pure(createApp[Id](symbol))
+      _ = liveOrders.foreach(a.liveOrdersRepo.putOrder(symbol, _))
+      b = a.liveOrdersRepo.getOrdersByTimeSortedDown(symbol)
+      c = a.trimLiveOrders(b, calQty, ListBuffer.empty)
     } yield c
-    x.get.size shouldBe 3
-    x.get.head.isInstanceOf[CancelOrder] shouldBe true
-    x.get(1).isInstanceOf[CancelOrder] shouldBe true
-    x.get.last.isInstanceOf[UpdateOrder] shouldBe true
-    val y = x.get.last.asInstanceOf[UpdateOrder]
+    x.size shouldBe 3
+    x.head.isInstanceOf[CancelOrder] shouldBe true
+    x(1).isInstanceOf[CancelOrder] shouldBe true
+    x.last.isInstanceOf[UpdateOrder] shouldBe true
+    val y = x.last.asInstanceOf[UpdateOrder]
     y.order.getQuantityL shouldBe (calQty - 0)
     y.order.getId shouldBe id1
   }
@@ -166,14 +161,15 @@ class AlgoTest extends AnyFlatSpec {
       createOrder(id3, 12L, 10L, 50.0, BuySell.BUY)
     )
     val x = for {
-      a <- createApp[Option](symbol, liveOrders)
-      b <- a.liveOrdersRepo.getOrdersByTimeSortedDown(symbol)
-      c <- a.trimLiveOrders(b, calQty, ListBuffer.empty)
+      a <- Monad[Id].pure(createApp[Id](symbol))
+      _ = liveOrders.foreach(a.liveOrdersRepo.putOrder(symbol, _))
+      b = a.liveOrdersRepo.getOrdersByTimeSortedDown(symbol)
+      c = a.trimLiveOrders(b, calQty, ListBuffer.empty)
     } yield c
-    x.get.size shouldBe 2
-    x.get.head.isInstanceOf[CancelOrder] shouldBe true
-    x.get(1).isInstanceOf[UpdateOrder] shouldBe true
-    val y = x.get.last.asInstanceOf[UpdateOrder]
+    x.size shouldBe 2
+    x.head.isInstanceOf[CancelOrder] shouldBe true
+    x(1).isInstanceOf[UpdateOrder] shouldBe true
+    val y = x.last.asInstanceOf[UpdateOrder]
     y.order.getQuantityL shouldBe (calQty - q1)
   }
 
@@ -187,12 +183,13 @@ class AlgoTest extends AnyFlatSpec {
       createOrder(id3, 12L, 10L, 50.0, BuySell.BUY)
     )
     val x = for {
-      a <- createApp[Option](symbol, liveOrders)
-      b <- a.liveOrdersRepo.getOrdersByTimeSortedDown(symbol)
-      c <- a.trimLiveOrders(b, calQty, ListBuffer.empty)
+      a <- Monad[Id].pure(createApp[Id](symbol))
+      _ = liveOrders.foreach(a.liveOrdersRepo.putOrder(symbol, _))
+      b = a.liveOrdersRepo.getOrdersByTimeSortedDown(symbol)
+      c = a.trimLiveOrders(b, calQty, ListBuffer.empty)
     } yield c
-    x.get.size shouldBe 3
-    x.get.head.isInstanceOf[CancelOrder] shouldBe true
+    x.size shouldBe 3
+    x.head.isInstanceOf[CancelOrder] shouldBe true
   }
 
   behavior of "getTotalQtyLiveOrders"
@@ -206,11 +203,9 @@ class AlgoTest extends AnyFlatSpec {
       createOrder("id2", 11L, q2, 50.0, BuySell.BUY),
       createOrder("id3", 12L, q3, 50.0, BuySell.BUY)
     )
-    val x = for {
-      a <- createApp[Id](symbol, liveOrders)
-      c <- a.getTotalQtyLiveOrders(symbol)
-    } yield c
-    x shouldBe (q1 + q2 + q3)
+    val a = createApp[Id](symbol)
+    val b = a.calcTotalQty(liveOrders)
+    b shouldBe (q1 + q2 + q3)
   }
 
   it should "return negative sum of all SELL orders quantity all orders" in {
@@ -222,20 +217,16 @@ class AlgoTest extends AnyFlatSpec {
       createOrder("id2", 11L, q2, 50.0, BuySell.SELL),
       createOrder("id3", 12L, q3, 50.0, BuySell.SELL)
     )
-    val x = for {
-      a <- createApp[Id](symbol, liveOrders)
-      c <- a.getTotalQtyLiveOrders(symbol)
-    } yield c
-    x shouldBe (q1 + q2 + q3) * -1
+    val a = createApp[Id](symbol)
+    val b = a.calcTotalQty(liveOrders)
+    b shouldBe (q1 + q2 + q3) * -1
   }
 
   it should "return 0 if no live orders" in {
     val liveOrders = List()
-    val x = for {
-      a <- createApp[Id](symbol, liveOrders)
-      c <- a.getTotalQtyLiveOrders(symbol)
-    } yield c
-    x shouldBe 0
+    val a = createApp[Id](symbol)
+    val b = a.calcTotalQty(liveOrders)
+    b shouldBe 0
   }
 
 }

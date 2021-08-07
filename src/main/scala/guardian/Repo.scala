@@ -1,6 +1,6 @@
 package guardian
 
-import cats.Monad
+import cats.{Applicative, Monad}
 import com.ingalys.imc.order.Order
 import guardian.Entities.Portfolio
 import guardian.Error.UnexpectedError
@@ -18,27 +18,27 @@ abstract class LiveOrdersRepoAlgebra[F[_]] {
   def removeOrder(symbol: String, id: String): F[Unit]
 }
 
-class LiveOrdersInMemInterpreter[F[_]: Monad] extends LiveOrdersRepoAlgebra[F] {
+class LiveOrdersInMemInterpreter[F[_]: Applicative] extends LiveOrdersRepoAlgebra[F] {
   private var db: Map[String, Map[String, Order]] = Map.empty
 
   override def putOrder(symbol: String, order: Order): F[Unit] = {
     val subMap = db.getOrElse(symbol, Map.empty)
     db += (symbol -> (subMap + (order.getId -> order)))
-    Monad[F].unit
+    Applicative[F].unit
   }
 
   override def getOrdersByTimeSortedDown(symbol: String): F[List[Order]] =
-    Monad[F].pure(db.getOrElse(symbol, Map.empty).values.toList.sortWith(_.getTimestampNanos > _.getTimestampNanos))
+    Applicative[F].pure(db.getOrElse(symbol, Map.empty).values.toList.sortWith(_.getTimestampNanos > _.getTimestampNanos))
 
   override def getOrder(symbol: String, id: String): F[Option[Order]] =
-    Monad[F].pure {
+    Applicative[F].pure {
       db.getOrElse(symbol, Map.empty).get(id)
     }
 
   override def removeOrder(symbol: String, id: String): F[Unit] = {
     val subMap = db.getOrElse(symbol, Map.empty)
     db += (symbol -> (subMap - id))
-    Monad[F].unit
+    Applicative[F].unit
   }
 }
 
