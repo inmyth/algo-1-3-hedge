@@ -3,7 +3,8 @@ package guardian
 import cats.implicits._
 import cats.{Id, Monad}
 import com.ingalys.imc.BuySell
-import guardian.Entities.OrderAction.{CancelOrder, UpdateOrder}
+import guardian.Entities.OrderAction.{CancelOrder, InsertOrder, UpdateOrder}
+import guardian.Entities.Portfolio
 import guardian.Shared.createOrder
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers.convertToAnyShouldWrapper
@@ -155,42 +156,153 @@ class AlgoTest extends AnyFlatSpec {
     x.head.isInstanceOf[CancelOrder] shouldBe true
   }
 
-  behavior of "getTotalQtyLiveOrders"
 
-  it should "return positive sum of all BUY orders quantity all orders" in {
-    val q1 = 100L
-    val q2 = 30L
-    val q3 = 10L
+
+  behavior of "createOrderActions"
+
+
+
+  val rawOrderBuy = createOrder("id1", 10L, 500L, 50.0, BuySell.BUY)
+  val rawOrderSell = createOrder("id2", 11L, 200L, 50.0, BuySell.SELL)
+
+  it should "return InsertOrder when buying and live orders are empty" in {
+    val x = for {
+      a <- Monad[Id].pure(createApp[Id](symbol))
+      c <- a.createOrderActions(rawOrderBuy)
+    } yield c
+    x.size shouldBe 1
+    x.head.isInstanceOf[InsertOrder] shouldBe true
+  }
+
+  it should "return InsertOrder when selling and live orders are empty and portfolio has enough position" in {
+    val x = for {
+      a <- Monad[Id].pure(createApp[Id](symbol))
+      _ <- a.portfolioRepo.put(symbol, Portfolio(symbol, Long.MaxValue))
+      c <- a.createOrderActions(rawOrderSell)
+    } yield c
+    x.size shouldBe 1
+    x.head.isInstanceOf[InsertOrder] shouldBe true
+  }
+
+  it should "return only CancelOrders when selling if its direction and live orders' direction don't match and portfolio is empty" in {
     val liveOrders = List(
-      createOrder("id1", 10L, q1, 50.0, BuySell.BUY),
-      createOrder("id2", 11L, q2, 50.0, BuySell.BUY),
-      createOrder("id3", 12L, q3, 50.0, BuySell.BUY)
+      createOrder("id1", 10L, 100L, 50.0, BuySell.BUY),
+      createOrder("id2", 11L, 30L, 50.0, BuySell.BUY),
+      createOrder("id3", 12L, 10L, 50.0, BuySell.BUY)
     )
-    val a = createApp[Id](symbol)
-    val b = a.calcTotalQty(liveOrders)
-    b shouldBe (q1 + q2 + q3)
+    val x = for {
+      a <- Monad[Id].pure(createApp[Id](symbol))
+      _ = liveOrders.foreach(a.liveOrdersRepo.putOrder(symbol, _))
+      c <- a.createOrderActions(rawOrderSell)
+    } yield c
+    x.size shouldBe liveOrders.size
   }
+/*
+  sell, qty larger than live orders, portfolio enough
+  sell, qty larger than live orders, portfolio not enough
+  sell, qty smaller than live orders, portfolio enough
+  sell, qty smaller than live orders, portfolio not enough
 
-  it should "return negative sum of all SELL orders quantity all orders" in {
-    val q1 = 100L
-    val q2 = 30L
-    val q3 = 10L
+ */
+  it should "return one InsertOrder when selling with not enough position, new qty being current position = portfolio - live orders qty" in {
+    val qty1 = 100L
+    val qty2 = 30L
+    val qty3 = 10L
+    val position = 200L
     val liveOrders = List(
-      createOrder("id1", 10L, q1, 50.0, BuySell.SELL),
-      createOrder("id2", 11L, q2, 50.0, BuySell.SELL),
-      createOrder("id3", 12L, q3, 50.0, BuySell.SELL)
+      createOrder("id1", 10L, qty1, 50.0, BuySell.SELL),
+      createOrder("id2", 11L, qty2, 50.0, BuySell.SELL),
+      createOrder("id3", 12L, qty3, 50.0, BuySell.SELL)
     )
-    val a = createApp[Id](symbol)
-    val b = a.calcTotalQty(liveOrders)
-    b shouldBe (q1 + q2 + q3) * -1
+    val portfolio = Portfolio(symbol, position)
+    val x = for {
+      a <- Monad[Id].pure(createApp[Id](symbol))
+      _ = liveOrders.foreach(a.liveOrdersRepo.putOrder(symbol, _))
+      _ <- a.portfolioRepo.put(symbol, portfolio)
+      c <- a.createOrderActions(rawOrderSell)
+    } yield c
+    x.size shouldBe 1
+    x.head.asInstanceOf[InsertOrder].order.getQuantityL shouldBe  position - (qty1 + qty2+ qty3)
   }
 
-  it should "return 0 if no live orders" in {
-    val liveOrders = List()
-    val a = createApp[Id](symbol)
-    val b = a.calcTotalQty(liveOrders)
-    b shouldBe 0
+  it should "return one InsertOrder when buying with not enough position (buy doesn't depend on portfolio), new qty = order.qty - live orders qty" in {
+    val qty1 = 100L
+    val qty2 = 30L
+    val qty3 = 10L
+    val position = 200L
+    val liveOrders = List(
+      createOrder("id1", 10L, qty1, 50.0, BuySell.BUY),
+      createOrder("id2", 11L, qty2, 50.0, BuySell.BUY),
+      createOrder("id3", 12L, qty3, 50.0, BuySell.BUY)
+    )
+    val portfolio = Portfolio(symbol, position)
+    val x = for {
+      a <- Monad[Id].pure(createApp[Id](symbol))
+      _ = liveOrders.foreach(a.liveOrdersRepo.putOrder(symbol, _))
+      _ <- a.portfolioRepo.put(symbol, portfolio)
+      c <- a.createOrderActions(rawOrderBuy)
+    } yield c
+    x.size shouldBe 1
+    x.head.asInstanceOf[InsertOrder].order.getQuantityL shouldBe rawOrderBuy.getQuantityL - (qty1 + qty2+ qty3)
   }
+
+  it should "return one InsertOrder when selling with enough position, new qty = order.qty - live orders qty" in {
+    val qty1 = 100L
+    val qty2 = 30L
+    val qty3 = 10L
+    val position = 1000000L
+    val liveOrders = List(
+      createOrder("id1", 10L, qty1, 50.0, BuySell.SELL),
+      createOrder("id2", 11L, qty2, 50.0, BuySell.SELL),
+      createOrder("id3", 12L, qty3, 50.0, BuySell.SELL)
+    )
+    val portfolio = Portfolio(symbol, position)
+    val x = for {
+      a <- Monad[Id].pure(createApp[Id](symbol))
+      _ = liveOrders.foreach(a.liveOrdersRepo.putOrder(symbol, _))
+      _ <- a.portfolioRepo.put(symbol, portfolio)
+      c <- a.createOrderActions(rawOrderSell)
+    } yield c
+    x.size shouldBe 1
+    x.head.asInstanceOf[InsertOrder].order.getQuantityL shouldBe rawOrderSell.getQuantityL - (qty1 + qty2 + qty3)
+  }
+
+  it should "trim live orders when sell or buy order qty is smaller than live orders qty" in {
+    val liveOrders = List(
+      createOrder("id1", 10L, 100L, 50.0, BuySell.SELL),
+      createOrder("id2", 11L, 30L, 50.0, BuySell.SELL),
+      createOrder("id3", 12L, 10L, 50.0, BuySell.SELL)
+    )
+    val portfolio = Portfolio(symbol, 200L)
+    val x = for {
+      a <- Monad[Id].pure(createApp[Id](symbol))
+      _ = liveOrders.foreach(a.liveOrdersRepo.putOrder(symbol, _))
+      _ <- a.portfolioRepo.put(symbol, portfolio)
+      c <- a.createOrderActions(createOrder("xx", 10L, 110, 50.0, BuySell.SELL))
+    } yield c
+    x.size shouldBe 2
+    x.head.isInstanceOf[CancelOrder] shouldBe true
+    x.last.isInstanceOf[UpdateOrder] shouldBe true
+    x.last.asInstanceOf[UpdateOrder].order.getQuantityL shouldBe 10L
+  }
+
+
+  it should "cancel all live orders when sell or buy order qty is 0" in {
+    val liveOrders = List(
+      createOrder("id1", 10L, 100L, 50.0, BuySell.SELL),
+      createOrder("id2", 11L, 30L, 50.0, BuySell.SELL),
+      createOrder("id3", 12L, 10L, 50.0, BuySell.SELL)
+    )
+    val portfolio = Portfolio(symbol, 200L)
+    val x = for {
+      a <- Monad[Id].pure(createApp[Id](symbol))
+      _ = liveOrders.foreach(a.liveOrdersRepo.putOrder(symbol, _))
+      _ <- a.portfolioRepo.put(symbol, portfolio)
+      c <- a.createOrderActions(createOrder("xx", 10L, 0, 50.0, BuySell.SELL))
+    } yield c
+    x.count(_.isInstanceOf[CancelOrder]) shouldBe liveOrders.size
+  }
+
 
 }
 

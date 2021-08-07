@@ -22,14 +22,6 @@ class Algo[F[_]: Monad](
             val pendingCalculationRepo: PendingCalculationAlgebra[F],
             underlyingSymbol: String //PTT, Delta
           ) {
-//val ulInstrument: InstrumentDescriptor
-  /*
-    define parameter val: Instrument
-
-   */
-
-
-
 
   def calculate(): F[Order] = Monad[F].pure(
     createOrder(666L, 122.0, BuySell.BUY, UUID.randomUUID().toString)
@@ -41,50 +33,47 @@ class Algo[F[_]: Monad](
     c <- portfolioRepo.get(underlyingSymbol)
     d <- Monad[F].pure{
       if(a.isEmpty){
-        List(createInsertOrderAgainstPortfolio(order, c, 0L))
+        createInsertOrder(order.getQuantityL, order.getPrice, order.getBuySell, c.position).toList
       }
       else {
         if(order.getBuySell != a.head.getBuySell){
-          a.map(createCancelOrder) :+ createInsertOrderAgainstPortfolio(order, c, b) // cancels then insert
+          a.map(createCancelOrder) ++  createInsertOrder(order.getQuantityL, order.getPrice, order.getBuySell, c.position).toList // cancels are first
         }
         else {
-          if(order.getQuantityL == 0L){
-            a.map(createCancelOrder)
-          } else if (order.getQuantityL < b){
+          val wantQty = order.getQuantityL - b
+          if (wantQty < 0L){
             trimLiveOrders(a, order.getQuantityL, ListBuffer.empty)
-          } else {
-            List(createInsertOrderAgainstPortfolio(order, c, b))
+          }
+          else if(wantQty == 0L){
+            a.map(createCancelOrder)
+          }
+          else {
+            val avaQty = if(order.getBuySell == BuySell.BUY) Long.MaxValue else c.position - b
+            createInsertOrder(wantQty, order.getPrice, order.getBuySell, avaQty).toList
           }
         }
       }
     }
   } yield d
 
-  def calcTotalQty(orders: List[Order]): Long =
-    orders.foldLeft(0L)((a: Long, b: Order) => b.getBuySell match {
-    case BuySell.BUY => a + b.getQuantityL
-    case BuySell.SELL => a - b.getQuantityL
-  })
+  def calcTotalQty(orders: List[Order]): Long = orders.foldLeft(0L)((a: Long, b: Order) => a + b.getQuantityL)
 
   val createCancelOrder: Order => OrderAction = o => CancelOrder(o.getId)
 
-  def createInsertOrderAgainstPortfolio(order: Order, p: Portfolio, livesQty: Long): OrderAction = {
-    order.getBuySell match {
-      case BuySell.BUY =>
-        InsertOrder {
-          val ava = p.position + livesQty
-          if(order.getQuantityL > ava) {
-            createOrder(ava, order.getPrice, BuySell.BUY, UUID.randomUUID().toString)
+  def createInsertOrder(wantQty: Long, price: Double, buySell: Int, availableQty: Long): Option[OrderAction] = {
+    buySell match {
+      case BuySell.SELL =>
+          if(availableQty <= 0L){
+            None
+          } else if(availableQty <= wantQty) {
+            Some(InsertOrder(createOrder(availableQty, price, buySell, UUID.randomUUID().toString)))
           } else {
-            order
+            Some(InsertOrder(createOrder(wantQty, price, buySell, UUID.randomUUID().toString)))
           }
-        }
-      case _ => InsertOrder(order)
+      case _ => Some(InsertOrder(createOrder(wantQty, price, buySell, UUID.randomUUID().toString)))
     }
   }
-
-
-
+  
   @tailrec
   final def trimLiveOrders(
                             liveOrders: List[Order],
