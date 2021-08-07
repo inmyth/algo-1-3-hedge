@@ -67,9 +67,9 @@ class UnderlyingPortfolioInterpreter[F[_]: Monad] extends UnderlyingPortfolioAlg
 
 abstract class PendingOrdersAlgebra[F[_]] {
 
-  def add(order: Order): F[Unit]
+  def put(order: Order): F[Unit]
 
-  def get(id: String): F[Error Either Order]
+  def get(id: String): F[Option[Order]]
 
   def remove(id: String): F[Unit]
 
@@ -78,15 +78,13 @@ abstract class PendingOrdersAlgebra[F[_]] {
 class PendingOrdersInMemInterpreter[F[_]: Monad] extends PendingOrdersAlgebra[F] {
   private var db: Map[String, Order] = Map.empty
 
-  override def add(order: Order): F[Unit] = {
+  override def put(order: Order): F[Unit] = {
     db += (order.getId -> order)
     Monad[F].unit
   }
 
-  override def get(id: String): F[Error Either Order] =
-    Monad[F].pure(
-      db.get(id).fold[Either[Error, Order]](Left(UnexpectedError(s"Pending order not found $id")))(p => Right(p))
-    )
+  override def get(id: String): F[Option[Order]] =
+    Monad[F].pure(db.get(id))
 
   override def remove(id: String): F[Unit] = {
     db -= id
