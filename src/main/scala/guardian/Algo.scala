@@ -1,19 +1,20 @@
 package guardian
 
 import cats.Monad
-import cats.effect.IO
+import cats.data.EitherT
 import cats.implicits._
 import com.ingalys.imc.BuySell
 import com.ingalys.imc.order.Order
-import guardian.Entities.{OrderAction, Portfolio}
+import guardian.Algo._
+import guardian.Entities.OrderAction
 import guardian.Entities.OrderAction.{CancelOrder, InsertOrder, UpdateOrder}
+import guardian.Error.UnknownError
 import horizontrader.services.instruments.InstrumentDescriptor
 
 import java.util.UUID
 import scala.annotation.tailrec
 import scala.collection.mutable.ListBuffer
 import scala.language.higherKinds
-import guardian.Algo._
 
 class Algo[F[_]: Monad](
             val liveOrdersRepo: LiveOrdersRepoAlgebra[F],
@@ -23,7 +24,8 @@ class Algo[F[_]: Monad](
             underlyingSymbol: String //PTT, Delta
           ) {
 
-  def calculate(): F[Order] = Monad[F].pure(
+  def calculate(ulId: String): F[Order] = Monad[F].pure(
+
     createOrder(666L, 122.0, BuySell.BUY, UUID.randomUUID().toString)
   )
 
@@ -73,7 +75,7 @@ class Algo[F[_]: Monad](
       case _ => Some(InsertOrder(createOrder(wantQty, price, buySell, UUID.randomUUID().toString)))
     }
   }
-  
+
   @tailrec
   final def trimLiveOrders(
                             liveOrders: List[Order],
@@ -96,18 +98,38 @@ class Algo[F[_]: Monad](
     }
   }
 
-  def updateLiveOrders(act: OrderAction, symbol: String): F[Unit] =
+  def updateLiveOrders(act: OrderAction): F[Unit] =
     act match {
-      case InsertOrder(order) => liveOrdersRepo.putOrder(symbol, order)
-      case UpdateOrder(order) => liveOrdersRepo.putOrder(symbol, order)
-      case CancelOrder(id)    => liveOrdersRepo.removeOrder(symbol, id)
+      case InsertOrder(order) => liveOrdersRepo.putOrder(underlyingSymbol, order)
+      case UpdateOrder(order) => liveOrdersRepo.putOrder(underlyingSymbol, order)
+      case CancelOrder(id)    => liveOrdersRepo.removeOrder(underlyingSymbol, id)
     }
 
-  def process(): F[List[OrderAction]] = for {
-    a <- calculate()
+
+
+  def processOnSignal(): F[List[OrderAction]] = for {
+    a <- calculate("underlyingID")
     b <- createOrderActions(a)
     _ <- b.map(p => pendingOrdersRepo.put(p)).sequence
   } yield b
+
+  def processOnOrderAck(id: String): F[Unit] =
+    (for {
+    a <- EitherT.liftF[F, Error, Option[OrderAction]](pendingOrdersRepo.get(id))
+    b <- EitherT.fromEither[F](a.fold[Either[Error, OrderAction]](Left(UnknownError(s"Pending order not found, id:$id")))(p => Right(p)))
+    _ <- EitherT.liftF[F, Error, Unit](updateLiveOrders(b))
+  } yield ()).value
+      .map {
+        case Left(e) => println(e.msg)
+        case Right(_) =>
+      }
+
+  def onOrder(id: String, process: String => F[Unit]) = for {
+    a <- process(id)
+//    b <- pendingCalculationRepo.shouldCalculate()
+  } yield ()
+
+
 
 
 }

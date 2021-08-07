@@ -3,7 +3,7 @@ package guardian
 import cats.{Applicative, Monad}
 import com.ingalys.imc.order.Order
 import guardian.Entities.{OrderAction, Portfolio}
-import guardian.Error.UnexpectedError
+import guardian.Error.UnknownError
 
 import scala.language.higherKinds
 
@@ -104,6 +104,8 @@ abstract class PendingCalculationAlgebra[F[_]] {
 
   def shouldCalculate(derivativeSymbol: String): F[Boolean]
 
+  def getAll: F[List[String]]
+
 }
 
 class PendingCalculationInMemInterpreter[F[_]: Monad] extends PendingCalculationAlgebra[F] {
@@ -120,4 +122,6 @@ class PendingCalculationInMemInterpreter[F[_]: Monad] extends PendingCalculation
     db -= derivativeSymbol
     Monad[F].unit
   }
+
+  override def getAll(): F[List[String]] = Monad[F].pure(db.toList)
 }
