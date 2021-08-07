@@ -2,7 +2,7 @@ package guardian
 
 import cats.{Applicative, Monad}
 import com.ingalys.imc.order.Order
-import guardian.Entities.Portfolio
+import guardian.Entities.{OrderAction, Portfolio}
 import guardian.Error.UnexpectedError
 
 import scala.language.higherKinds
@@ -67,23 +67,27 @@ class UnderlyingPortfolioInterpreter[F[_]: Monad] extends UnderlyingPortfolioAlg
 
 abstract class PendingOrdersAlgebra[F[_]] {
 
-  def put(order: Order): F[Unit]
+  def put(act: OrderAction): F[Unit]
 
-  def get(id: String): F[Option[Order]]
+  def get(id: String): F[Option[OrderAction]]
 
   def remove(id: String): F[Unit]
 
 }
 
 class PendingOrdersInMemInterpreter[F[_]: Monad] extends PendingOrdersAlgebra[F] {
-  private var db: Map[String, Order] = Map.empty
+  private var db: Map[String, OrderAction] = Map.empty
 
-  override def put(order: Order): F[Unit] = {
-    db += (order.getId -> order)
+  override def put(act: OrderAction): F[Unit] = {
+    act match {
+      case OrderAction.InsertOrder(order) => db += (order.getId -> act)
+      case OrderAction.UpdateOrder(order) => db += (order.getId -> act)
+      case OrderAction.CancelOrder(id) => db += (id -> act)
+    }
     Monad[F].unit
   }
 
-  override def get(id: String): F[Option[Order]] =
+  override def get(id: String): F[Option[OrderAction]] =
     Monad[F].pure(db.get(id))
 
   override def remove(id: String): F[Unit] = {

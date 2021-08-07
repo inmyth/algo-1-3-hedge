@@ -1,6 +1,7 @@
 package guardian
 
 import cats.Monad
+import cats.effect.IO
 import cats.implicits._
 import com.ingalys.imc.BuySell
 import com.ingalys.imc.order.Order
@@ -27,8 +28,12 @@ class Algo[F[_]: Monad](
 
    */
 
-  def calculate(): F[Order] = ???
 
+
+
+  def calculate(): F[Order] = Monad[F].pure(
+    createOrder(666L, 122.0, BuySell.BUY, UUID.randomUUID().toString)
+  )
 
   def createOrderActions(order: Order): F[List[OrderAction]] = for {
     a <- liveOrdersRepo.getOrdersByTimeSortedDown(underlyingSymbol)
@@ -40,7 +45,7 @@ class Algo[F[_]: Monad](
       }
       else {
         if(order.getBuySell != a.head.getBuySell){
-          a.map(createCancelOrder) :+ createInsertOrderAgainstPortfolio(order, c, b) // cancels come before insert
+          a.map(createCancelOrder) :+ createInsertOrderAgainstPortfolio(order, c, b) // cancels then insert
         }
         else {
           if(order.getQuantityL == 0L){
@@ -108,6 +113,12 @@ class Algo[F[_]: Monad](
       case UpdateOrder(order) => liveOrdersRepo.putOrder(symbol, order)
       case CancelOrder(id)    => liveOrdersRepo.removeOrder(symbol, id)
     }
+
+  def process(): F[List[OrderAction]] = for {
+    a <- calculate()
+    b <- createOrderActions(a)
+    _ <- b.map(p => pendingOrdersRepo.put(p)).sequence
+  } yield b
 
 
 }
