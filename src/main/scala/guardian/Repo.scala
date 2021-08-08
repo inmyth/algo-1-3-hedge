@@ -116,7 +116,7 @@ class PendingCalculationInMemInterpreter[F[_]: Monad] extends PendingCalculation
     Monad[F].unit
   }
 
-  override def shouldCalculate(derivativeSymbol: String): F[Boolean] = Monad[F].pure(db(derivativeSymbol))
+  override def shouldCalculate(derivativeSymbol: String): F[Boolean] = Monad[F].pure(!db.contains(derivativeSymbol))
 
   override def remove(derivativeSymbol: String): F[Unit] = {
     db -= derivativeSymbol

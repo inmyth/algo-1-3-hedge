@@ -31,8 +31,6 @@ class AlgoTest extends AnyFlatSpec {
   }
 
 
-
-
   it should "create 1 UpdateOrder if calQty between o2 and o3 in [o1, o2, o3]" in {
     val calQty = 135L
     val q1     = 100L
@@ -305,6 +303,27 @@ class AlgoTest extends AnyFlatSpec {
       c <- a.createOrderActions(createOrder("xx", 10L, 0, 50.0, BuySell.SELL))
     } yield c
     x.count(_.isInstanceOf[CancelOrder]) shouldBe liveOrders.size
+  }
+
+  behavior of "integrated test: handleOnSignal"
+
+  val dw1 = "PTT@ABC"
+
+  it should "return Left if pendingComputation is not empty" in {
+    val x = for {
+      a <- Monad[Id].pure(createApp[Id](symbol))
+      _ <- a.pendingCalculationRepo.put(dw1)
+      c <- a.handleOnSignal(dw1)
+    } yield c
+    x.isLeft shouldBe true
+  }
+
+  it should "return Right if pendingComputation is empty" in {
+    val x = for {
+      a <- Monad[Id].pure(createApp[Id](symbol))
+      b <- a.handleOnSignal(dw1)
+    } yield b
+    x.isRight shouldBe true
   }
 
 

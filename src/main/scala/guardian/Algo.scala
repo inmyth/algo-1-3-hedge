@@ -147,13 +147,12 @@ class Algo[F[_]: Monad](
     _ <- EitherT.right[Error](a.map(sendOrderAction).sequence)
     _ <- EitherT.right[Error](a.map(pendingOrdersRepo.put).sequence)
   } yield dwId).value.map{
-    case Right(v) => Some(v)
+    case Right(v) => Right(v)
     case Left(e) =>
       println(e.msg)
-      None
+      Left(e)
   }
-
-
+  
   def handleOnOrderAck(id: String) =
     (for {
     a <- getPendingOrderAction(id)
@@ -161,7 +160,7 @@ class Algo[F[_]: Monad](
     _ <- EitherT.right[Error](updateLiveOrders(a))
     d <- EitherT.right[Error](pendingCalculationRepo.getAll)
     e <- EitherT.right[Error](d.map(handleOnSignal).sequence)
-    _ <- EitherT.right[Error](e.filter(_.isDefined).map(p => pendingCalculationRepo.remove(p.get)).sequence)
+    _ <- EitherT.right[Error](e.filter(_.isRight).map(p => pendingCalculationRepo.remove(p.toOption.get)).sequence)
   } yield ())
 
   def handleOnOrderNak(id: String, errorMsg: String) =
@@ -172,7 +171,7 @@ class Algo[F[_]: Monad](
       _ <- EitherT.right[Error](pendingOrdersRepo.remove(id))
       d <- EitherT.right[Error](pendingCalculationRepo.getAll)
       e <- EitherT.right[Error](d.map(handleOnSignal).sequence)
-      _ <- EitherT.right[Error](e.filter(_.isDefined).map(p => pendingCalculationRepo.remove(p.get)).sequence)
+      _ <- EitherT.right[Error](e.filter(_.isRight).map(p => pendingCalculationRepo.remove(p.toOption.get)).sequence)
     } yield ())
 
 }
