@@ -15,4 +15,21 @@ object Entities {
     case class CancelOrder(id: String)   extends OrderAction
   }
 
+
+  case class DwData(projVolume: Long, projPrice: Double)
+
+  //  def getMarketMakerBid(): F[Error Either BigDecimal]
+  //
+  //  def getMarketMakerAsk(): F[Error Either BigDecimal]
+
+//  def getProjectedPrice(): F[Error Either BigDecimal] // this can come from Horizon
+//
+//  def getProjectedVolume(): F[Error Either Int] // comes from Horizon but needs to be adjusted
+//
+//  def getHedgeRatio(): F[Error Either BigDecimal]
+//
+//  def getResidual() = ???
+//
+//  def getLastUnderlyingProjectedPrice(): F[Error Either BigDecimal]
+
 }

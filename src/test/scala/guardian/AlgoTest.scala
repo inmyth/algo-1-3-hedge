@@ -1,8 +1,10 @@
 package guardian
 
+import algotrader.api.source.Source
 import cats.implicits._
 import cats.{Id, Monad}
 import com.ingalys.imc.BuySell
+import com.ingalys.imc.summary.Summary
 import guardian.Entities.OrderAction.{CancelOrder, InsertOrder, UpdateOrder}
 import guardian.Entities.Portfolio
 import guardian.Shared.createOrder
@@ -23,7 +25,9 @@ class AlgoTest extends AnyFlatSpec {
       val b = new UnderlyingPortfolioInterpreter[F]
       val c = new PendingOrdersInMemInterpreter[F]
       val d = new PendingCalculationInMemInterpreter[F]
-      new Algo[F](a, b, c, d, symbol)
+      val e = Map.empty[String, Source[Summary]]
+      val f = (s: String, d: Double) => ()
+      new Algo[F](a, b, c, d, symbol,  e, f)
   }
 
 
