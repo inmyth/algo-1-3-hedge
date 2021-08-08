@@ -101,13 +101,13 @@ class RepoTest extends AnyFlatSpec{
   behavior of "PendingCalculationInMemInterpreter"
   val pendingCalculationRepo = new PendingCalculationInMemInterpreter[Id]()
 
-  it should "put, remove, return shouldCalculate true if dw does not exist" in {
+  it should "put, remove, getAll" in {
     pendingCalculationRepo.put(symbol)
-    val a = pendingCalculationRepo.shouldCalculate(symbol)
-    a shouldBe false
+    val a = pendingCalculationRepo.getAll
+    a.size shouldBe 1
 
     pendingCalculationRepo.remove(symbol)
-    val b = pendingCalculationRepo.shouldCalculate(symbol)
-    b shouldBe true
+    val b = pendingCalculationRepo.getAll
+    b.size shouldBe 0
   }
 }

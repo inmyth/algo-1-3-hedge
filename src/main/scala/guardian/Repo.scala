@@ -73,6 +73,8 @@ abstract class PendingOrdersAlgebra[F[_]] {
 
   def remove(id: String): F[Unit]
 
+  def isEmpty: F[Boolean]
+
 }
 
 class PendingOrdersInMemInterpreter[F[_]: Monad] extends PendingOrdersAlgebra[F] {
@@ -94,6 +96,8 @@ class PendingOrdersInMemInterpreter[F[_]: Monad] extends PendingOrdersAlgebra[F]
     db -= id
     Monad[F].unit
   }
+
+  override def isEmpty: F[Boolean] = Monad[F].pure(db.isEmpty)
 }
 
 abstract class PendingCalculationAlgebra[F[_]] {
@@ -101,8 +105,6 @@ abstract class PendingCalculationAlgebra[F[_]] {
   def put(derivativeSymbol: String): F[Unit]
 
   def remove(derivativeSymbol: String): F[Unit]
-
-  def shouldCalculate(derivativeSymbol: String): F[Boolean]
 
   def getAll: F[List[String]]
 
@@ -116,12 +118,10 @@ class PendingCalculationInMemInterpreter[F[_]: Monad] extends PendingCalculation
     Monad[F].unit
   }
 
-  override def shouldCalculate(derivativeSymbol: String): F[Boolean] = Monad[F].pure(!db.contains(derivativeSymbol))
-
   override def remove(derivativeSymbol: String): F[Unit] = {
     db -= derivativeSymbol
     Monad[F].unit
   }
 
-  override def getAll(): F[List[String]] = Monad[F].pure(db.toList)
+  override def getAll: F[List[String]] = Monad[F].pure(db.toList)
 }

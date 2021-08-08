@@ -136,13 +136,13 @@ class Algo[F[_]: Monad](
     b <- EitherT.fromEither[F](a.fold[Either[Error, OrderAction]](Left(UnknownError(s"Pending order not found, dwId:$dwId")))(p => Right(p)))
   } yield b
 
-  def checkPendingCalculations(dwId: String): EitherT[F, StateError, Unit] = for {
-    a <- EitherT.right(pendingCalculationRepo.shouldCalculate(dwId))
-    b <- EitherT(Monad[F].pure(if(a) Right(()) else Left(StateError(s"Cannot procees, there are order pending for market id: $dwId"))))
-  } yield b
+  def checkPendingOrderAction(): EitherT[F, StateError, Unit] = for {
+        a <- EitherT.right[StateError](pendingOrdersRepo.isEmpty)
+        b <- EitherT.fromEither[F](if(a) Right(()) else Left(StateError("Cannot process, there are orders pending")))
+      } yield b
 
   def handleOnSignal(dwId: String) = (for {
-    _ <- checkPendingCalculations(dwId)
+    _ <- checkPendingOrderAction()
     a <- EitherT.right[Error](process(dwId))
     _ <- EitherT.right[Error](a.map(sendOrderAction).sequence)
     _ <- EitherT.right[Error](a.map(pendingOrdersRepo.put).sequence)
@@ -152,7 +152,7 @@ class Algo[F[_]: Monad](
       println(e.msg)
       Left(e)
   }
-  
+
   def handleOnOrderAck(id: String) =
     (for {
     a <- getPendingOrderAction(id)

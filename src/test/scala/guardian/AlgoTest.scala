@@ -305,14 +305,33 @@ class AlgoTest extends AnyFlatSpec {
     x.count(_.isInstanceOf[CancelOrder]) shouldBe liveOrders.size
   }
 
+  behavior of "checkPendingOrderAction"
+
+  it should "return Left when it pending orders exist " in {
+    val x = for {
+      a <- Monad[Id].pure(createApp[Id](symbol))
+      _ <- a.pendingOrdersRepo.put(InsertOrder(rawOrderBuy))
+      c <- a.checkPendingOrderAction()
+    } yield c
+    x.isLeft shouldBe true
+  }
+
+  it should "return Right when it pending orders empty " in {
+    val x = for {
+      a <- Monad[Id].pure(createApp[Id](symbol))
+      c <- a.checkPendingOrderAction()
+    } yield c
+    x.isRight shouldBe true
+  }
+
   behavior of "integrated test: handleOnSignal"
 
   val dw1 = "PTT@ABC"
 
-  it should "return Left if pendingComputation is not empty" in {
+  it should "return Left if pendingOrders is not empty" in {
     val x = for {
       a <- Monad[Id].pure(createApp[Id](symbol))
-      _ <- a.pendingCalculationRepo.put(dw1)
+      _ <- a.pendingOrdersRepo.put(InsertOrder(rawOrderBuy))
       c <- a.handleOnSignal(dw1)
     } yield c
     x.isLeft shouldBe true
@@ -325,6 +344,26 @@ class AlgoTest extends AnyFlatSpec {
     } yield b
     x.isRight shouldBe true
   }
+
+  behavior of "integrated test: handleOnOrderAck"
+
+  it should "return Right if pendingOrder is available in the repo" in {
+    val x = for {
+      a <- Monad[Id].pure(createApp[Id](symbol))
+      _ <- a.pendingOrdersRepo.put(InsertOrder(rawOrderBuy))
+      c <- a.handleOnOrderAck(rawOrderBuy.getId)
+    } yield c
+    x.value.isRight shouldBe true
+  }
+
+  it should "return Left if pendingOrder is not available in the repo" in {
+    val x = for {
+      a <- Monad[Id].pure(createApp[Id](symbol))
+      c <- a.handleOnOrderAck(rawOrderBuy.getId)
+    } yield c
+    x.value.isLeft shouldBe true
+  }
+
 
 
 }
