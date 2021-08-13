@@ -4,7 +4,9 @@ import algotrader.api.source.Source
 import cats.Monad
 import cats.data.EitherT
 import cats.implicits._
+import com.hsoft.hmm.api.automaton.Automaton
 import com.ingalys.imc.BuySell
+import com.ingalys.imc.depth.Depth
 import com.ingalys.imc.order.Order
 import com.ingalys.imc.summary.Summary
 import guardian.Algo._
@@ -25,7 +27,8 @@ class Algo[F[_]: Monad](
             val pendingCalculationRepo: PendingCalculationAlgebra[F],
             underlyingSymbol: String, //PTT, Delta
             dwMap: Map[String, Source[Summary]],
-            sendOrder: (String, Double) => Unit
+            sendOrder: (String, Double) => Unit,
+            logAlert: (String) => Unit
           ) {
 
   def calculateOrder(dwData: DwData): F[Order] = Monad[F].pure(
@@ -126,7 +129,7 @@ class Algo[F[_]: Monad](
   } yield c).value.map{
     case Right(v) => v
     case Left(e) =>
-      println(e)
+      logAlert(e.msg)
       List.empty[OrderAction]
   }
 
@@ -149,7 +152,7 @@ class Algo[F[_]: Monad](
   } yield dwId).value.map{
     case Right(v) => Right(v)
     case Left(e) =>
-      println(e.msg)
+      logAlert(e.msg)
       Left(e)
   }
 
@@ -166,7 +169,7 @@ class Algo[F[_]: Monad](
   def handleOnOrderNak(id: String, errorMsg: String) =
     (for {
       _ <- EitherT.right[Error](Monad[F].pure(
-        println(errorMsg)
+        logAlert(errorMsg)
       ))
       _ <- EitherT.right[Error](pendingOrdersRepo.remove(id))
       d <- EitherT.right[Error](pendingCalculationRepo.getAll)
@@ -185,4 +188,13 @@ object Algo{
     o.setId(id)
     o
   }
+
+
+
+  /*
+  Projected price <= automation best bid : CALL Sell UL
+Projected price >= automation best ask : CALL Buy UL
+Projected price <= automation best bid :PUTDW Buy UL
+Projected price >= automation best ask : PUTDW Sell UL
+   */
 }

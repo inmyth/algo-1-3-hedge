@@ -27,7 +27,8 @@ class AlgoTest extends AnyFlatSpec {
       val d = new PendingCalculationInMemInterpreter[F]
       val e = Map.empty[String, Source[Summary]]
       val f = (s: String, d: Double) => ()
-      new Algo[F](a, b, c, d, symbol,  e, f)
+      val g = (s: String) => (println(s))
+      new Algo[F](a, b, c, d, symbol,  e, f, g)
   }
 
 

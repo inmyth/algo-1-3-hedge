@@ -19,8 +19,8 @@ object Entities {
   case class DwData(projVolume: Long, projPrice: Double)
 
   //  def getMarketMakerBid(): F[Error Either BigDecimal]
-  //
-  //  def getMarketMakerAsk(): F[Error Either BigDecimal]
+
+  //  def getMarketMakerAsk(): F[Error Either BigDecimal] // Automaton = Market maker
 
 //  def getProjectedPrice(): F[Error Either BigDecimal] // this can come from Horizon
 //

@@ -124,4 +124,5 @@ class PendingCalculationInMemInterpreter[F[_]: Monad] extends PendingCalculation
   }
 
   override def getAll: F[List[String]] = Monad[F].pure(db.toList)
+
 }
