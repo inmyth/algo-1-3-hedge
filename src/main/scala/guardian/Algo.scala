@@ -42,6 +42,9 @@ class Algo[F[_]: Monad](
   } yield b
 
 
+  /*
+   portfolio
+   */
   def createOrderActions(order: Order): F[List[OrderAction]] = for {
     a <- liveOrdersRepo.getOrdersByTimeSortedDown(underlyingSymbol)
     b <- Monad[F].pure(calcTotalQty(a))
@@ -144,7 +147,7 @@ class Algo[F[_]: Monad](
         b <- EitherT.fromEither[F](if(a) Right(()) else Left(StateError("Cannot process, there are orders pending")))
       } yield b
 
-  def handleOnSignal(dwId: String) = (for {
+  def handleOnSignal(dwId: String): F[Either[Error, String]] = (for {
     _ <- checkPendingOrderAction()
     a <- EitherT.right[Error](process(dwId))
     _ <- EitherT.right[Error](a.map(sendOrderAction).sequence)
@@ -156,25 +159,22 @@ class Algo[F[_]: Monad](
       Left(e)
   }
 
-  def handleOnOrderAck(id: String) =
+  def handleOnOrderAck(id: String): EitherT[F, Error, Unit] =
     (for {
     a <- getPendingOrderAction(id)
-    _ <- EitherT.right[Error](pendingOrdersRepo.remove(id))
     _ <- EitherT.right[Error](updateLiveOrders(a))
+    _ <- EitherT.right[Error](pendingOrdersRepo.remove(id))
     d <- EitherT.right[Error](pendingCalculationRepo.getAll)
     e <- EitherT.right[Error](d.map(handleOnSignal).sequence)
     _ <- EitherT.right[Error](e.filter(_.isRight).map(p => pendingCalculationRepo.remove(p.toOption.get)).sequence)
   } yield ())
 
-  def handleOnOrderNak(id: String, errorMsg: String) =
+  def handleOnOrderNak(id: String, errorMsg: String): EitherT[F, Error, Unit] =
     (for {
       _ <- EitherT.right[Error](Monad[F].pure(
         logAlert(errorMsg)
       ))
-      _ <- EitherT.right[Error](pendingOrdersRepo.remove(id))
-      d <- EitherT.right[Error](pendingCalculationRepo.getAll)
-      e <- EitherT.right[Error](d.map(handleOnSignal).sequence)
-      _ <- EitherT.right[Error](e.filter(_.isRight).map(p => pendingCalculationRepo.remove(p.toOption.get)).sequence)
+      _ <- handleOnOrderAck(id)
     } yield ())
 
 }
@@ -189,12 +189,38 @@ object Algo{
     o
   }
 
+  @tailrec
+  def getPriceAfterTicks(isPlus: Boolean, ticks: Int, price: BigDecimal): BigDecimal = {
+    if(ticks < 1){
+      price
+    }
+    else{
+      println(if(isPlus) price + SETChkSpread(price, isPlus) else price - SETChkSpread(price, isPlus))
+      getPriceAfterTicks(isPlus, ticks - 1, (if(isPlus) price + SETChkSpread(price, isPlus) else price - SETChkSpread(price, isPlus)).setScale(2, BigDecimal.RoundingMode.HALF_UP))
+    }
+  }
+
+  def SETChkSpread(refPrice:BigDecimal, isUp: Boolean): Double ={
+    val c: List[(BigDecimal, Double, Double)]=
+      List(
+        (BigDecimal("0"), 0.0, 0.01),
+        (BigDecimal("2"), 0.01, 0.02),
+        (BigDecimal("5"), 0.02, 0.05),
+        (BigDecimal("10"), 0.05, 0.1),
+        (BigDecimal("25"), 0.1, 0.25),
+        (BigDecimal("100"), 0.25, 0.5),
+        (BigDecimal("200"), 0.5, 1),
+        (BigDecimal("400"), 1, 2)
+      )
+    val x = c.filter(p => refPrice >= p._1).last
+    if(refPrice == x._1 && !isUp) x._2 else x._3
+  }
 
 
   /*
   Projected price <= automation best bid : CALL Sell UL
-Projected price >= automation best ask : CALL Buy UL
-Projected price <= automation best bid :PUTDW Buy UL
-Projected price >= automation best ask : PUTDW Sell UL
+  Projected price >= automation best ask : CALL Buy UL
+  Projected price <= automation best bid : PUTDW Buy UL
+  Projected price >= automation best ask : PUTDW Sell UL
    */
 }

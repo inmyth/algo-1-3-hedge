@@ -7,7 +7,7 @@ import com.ingalys.imc.BuySell
 import com.ingalys.imc.summary.Summary
 import guardian.Entities.OrderAction.{CancelOrder, InsertOrder, UpdateOrder}
 import guardian.Entities.Portfolio
-import guardian.Shared.createOrder
+import guardian.Fixtures.createOrder
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers.convertToAnyShouldWrapper
 
@@ -365,7 +365,27 @@ class AlgoTest extends AnyFlatSpec {
     x.value.isLeft shouldBe true
   }
 
+//  behavior of "integrated test: handleOnOrderNak"
+//
 
+
+  behavior of "getPriceAfterTicks"
+
+  it should "return 32 when price is 30.75 ticked down 5 steps" in {
+    Algo.getPriceAfterTicks(false, 5, BigDecimal(32)) shouldBe 30.75
+  }
+
+  it should "return 24.70 when price is 25.50 ticked down 5 steps" in {
+    Algo.getPriceAfterTicks(false, 5, BigDecimal(25.50)) shouldBe 24.70
+  }
+
+  it should "return 101.5 when price is 99.5 ticked up 5 steps" in {
+    Algo.getPriceAfterTicks(true, 5, BigDecimal(99.50)) shouldBe 101.5
+  }
+
+  it should "return 98.25 when price is 99.5 ticked down 5 steps" in {
+    Algo.getPriceAfterTicks(false, 5, BigDecimal(99.50)) shouldBe 98.25
+  }
 
 }
 

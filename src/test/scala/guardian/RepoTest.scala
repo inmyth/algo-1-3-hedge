@@ -6,7 +6,7 @@ import com.ingalys.imc.BuySell
 import guardian.Entities.OrderAction.{CancelOrder, InsertOrder, UpdateOrder}
 import guardian.Entities.{OrderAction, Portfolio}
 import org.scalatest.flatspec.AnyFlatSpec
-import guardian.Shared.createOrder
+import guardian.Fixtures.createOrder
 import org.scalatest.matchers.should.Matchers.convertToAnyShouldWrapper
 
 class RepoTest extends AnyFlatSpec{
