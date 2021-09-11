@@ -11,6 +11,7 @@ import com.hsoft.hmm.api.automaton.spi.DefaultAutomaton
 import com.hsoft.hmm.api.source.position.RiskPositionDetailsSourceBuilder
 import com.hsoft.hmm.api.source.pricing.{Pricing, PricingSourceBuilder}
 import com.hsoft.hmm.posman.api.position.container.RiskPositionDetailsContainer
+import com.ingalys.imc.depth.DepthOrder
 import com.ingalys.imc.summary.Summary
 import horizontrader.plugins.hmm.connections.service.IDictionaryProvider
 import horizontrader.services.instruments.{InstrumentDescriptor, InstrumentInfoService}
@@ -26,15 +27,59 @@ trait Controller extends NativeController {
   val ulId:String = "PTT"
   val ulInstrument: InstrumentDescriptor
   val hedgeInstrument:InstrumentDescriptor
-  val dictionaryService = getService[IDictionaryProvider]
+  val dictionaryService: IDictionaryProvider = getService[IDictionaryProvider]
   import algotrader.api.source.summary._
 
-  onMessage {
+  def getDwList(ds: IDictionaryProvider, ulId: String, exchangeName: String = "SET"): List[InstrumentDescriptor] =
+    ds.getDictionary.getProducts(null).values().asScala
+      .map(p => p.asInstanceOf[Derivative])
+      .filter(d => d.getUlId == ulId && d.getProductType == ProductTypes.WARRANT)
+      .map(p => getService[InstrumentInfoService].getInstrumentByUniqueId(exchangeName, p.getId) )
+      .toList
+      
+  def getProjectedPrice(inDe: InstrumentDescriptor): Option[Double] = source[Summary].get(inDe).latest.flatMap(_.theoOpenPrice) 
+  def getProjectedVolume(inDe: InstrumentDescriptor): Option[Long] = source[Summary].get(inDe).latest.flatMap(_.theoOpenVolume)
 
+  def getOwnMatchedOrder(projectedPrice: Double, projectedVolume: Double): Int = ???
+  def getDelta(dwId: String) = source[Pricing].get(dwId,"DEFAULT").latest.get.delta
+
+  def calcResidual(dwList: List[InstrumentDescriptor]) =
+    (dwList, dwList.map(p => getDelta(p.getUniqueId)), dwList.map(getProjectedVolume))
+      .zipped
+      .toList
+      .map {
+        case (_, delta, Some(vol)) => delta * vol
+        case _ => 0
+      }
+      .sum
+
+  def calcTotalResidual(dwList: List[InstrumentDescriptor], ul: InstrumentDescriptor) = 
+    calcResidual(dwList) + calcResidual(List(ul))
+  
+  
+  def main: Unit = {
+    val dwList = getDwList(dictionaryService, ulId)
+    
+    val dwProjectedPriceList = dwList.map(getProjectedPrice)
+    val dwProjectedVolumeList = dwList.map(getProjectedVolume)
+    val deltaList = dwList.map(p => getDelta(p.getUniqueId))
+    val totalResidual = calcTotalResidual(dwList, ulInstrument)
+    val ownMatchedOrderList = (dwProjectedPriceList, dwProjectedVolumeList)
+      .zipped
+      .toList
+      .map{
+        case (Some(price), Some(vol)) => getOwnMatchedOrder(price, vol)
+        case _ => 0
+      }
+    // send own order to main calculation 
+  }
+  
+  onMessage {
+        
     case Load =>
       /*
-        Get derivative warrants
-        - What is "SET" ?
+        Get all derivative warrants
+        - What is "SET" ? exchange name
        */
       val dwList: List[InstrumentDescriptor] = dictionaryService.getDictionary.getProducts(null).values().asScala
         .map(p => p.asInstanceOf[Derivative])
@@ -50,48 +95,93 @@ trait Controller extends NativeController {
       val dwId = "PTT24CA"
       val dwPTT24CA = dwList.find(p => p.getUniqueId == dwId)
 
+
       /*
         Get projected price, projected volume of a dw
        */
-      val ssDwPTT24CA = source[Summary].get(dwPTT24CA.get)
+      val ssDwPTT24CA = source[Summary].get(dwPTT24CA.get) // .map(_.modeStr.get)
       val ssDwPTT24CA_ProjectedPrice =  ssDwPTT24CA.latest.get.theoOpenPrice
       val ssDwPTT24CA_ProjectedVolume = ssDwPTT24CA.latest.get.theoOpenVolume
 
       /*
-        Get delta
-        - Is the symbol (dwId) correct ?
-       */
-      val ssDwPTT24CA_pricingSource = source[Pricing].get(dwId,"DEFAULT")
-      val delta = ssDwPTT24CA_pricingSource.latest.get.delta
-
-    /*
-      Get residual
-
+      Get own quantity
+      Confirm with others
      */
 
-    /*
-      Get direction (buy / sell)
-
-        Method 1:
-        Projected price <= automation best bid : CALL Sell UL
-        Projected price >= automation best ask : CALL Buy UL
-        Projected price <= automation best bid : PUTDW Buy UL
-        Projected price >= automation best ask : PUTDW Sell UL
-
-     */
-
-
-      /*
-        Get own quantity
-       */
-      val automan = new DefaultAutomaton("SET-EMAPI-HMM-PROXY",dwId, "DEFAULT")
+      val x= DepthOrder
+      val automan = new DefaultAutomaton("SET-EMAPI-HMM-PROXY", dwId, "DEFAULT")
       log.info (s"ProductID="+automan.getProductId)
+//      val ownBidPrice = automan.getBidPrice
       val ownBidOrderQty = automan.getBaseBidSize
       val ownAskOrderQty = automan.getBaseAskSize
 
 
+      /*
+      Get someone else's volume
+        if we know otherPeopleVol we will find ourOwnMatchedVol
+
+        if()
+
+
+        else
+
+       */
+
+      /*
+  Get delta
+  - Is the symbol (dwId) correct ?
+ */
+      val ssDwPTT24CA_pricingSource = source[Pricing].get(dwId,"DEFAULT")
+      val delta = ssDwPTT24CA_pricingSource.latest.get.delta
+
+    /*
+    
+      Get residual
+      Nop: Sum(ProjDWMatchQty*delta)
+      PTT
+      PTT24C2201A CallDW Delta 0.01  Sell ProjDWMatchQty  20,000  ProjDWMatchQty*delta = Buy UL 200
+      PTT24C2201B CallDW Delta 0.02  Buy ProjDWMatchQty  20,000  ProjDWMatchQty*delta = Sell UL -400
+      PTT24P2201A PutDW Delta -0.01 Sell ProjDWMatchQty  10,000  ProjDWMatchQty*delta = Sell UL -100
+      PTT24P2201B PutDW Delta -0.04 Buy ProjDWMatchQty  10,000  ProjDWMatchQty*delta = Buy UL 400
+
+      residual sumDW = (200+-400+-100+400) = 100 Buy UL 100
+
+      residual portfolio can get from portfolio Buy UL 300
+
+      residual sumDW + residual portfolio Send the order
+
+     */
+
+
+
+      /*
+        Revisit:
+        Get direction (ask / bid)
+  
+          Method 1:
+          Projected price <= automation best bid : CALL Sell UL
+          Projected price >= automation best ask : CALL Buy UL
+          Projected price <= automation best bid : PUTDW Buy UL
+          Projected price >= automation best ask : PUTDW Sell UL
+  
+          Method2:
+          Look at the name of the dw market
+  
+       */
+
+
+
+
+
     /*
        At this point we have the quantity of the order we need to send to underlying market
+       - DwData :
+          dw projected price,
+          dw projected volume,
+          ownVolume,
+          hedge ratio,
+          residual,
+          call or put
      */
 
 
@@ -99,8 +189,7 @@ trait Controller extends NativeController {
         Get underlying projected price
        */
       val ssPTT = source[Summary].get(ulInstrument)
-      val ssPTT_ProjectedPrice =  ssDwPTT24CA.latest.get.theoOpenPrice.get
-
+      val ssPTT_ProjectedPrice =  ssPTT.latest.get.theoOpenPrice.get
 
 
       /*
@@ -345,5 +434,6 @@ trait controller extends NativeController {
 
 }
  */
+
 
 ```
