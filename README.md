@@ -11,6 +11,7 @@ import com.hsoft.hmm.api.automaton.spi.DefaultAutomaton
 import com.hsoft.hmm.api.source.position.RiskPositionDetailsSourceBuilder
 import com.hsoft.hmm.api.source.pricing.{Pricing, PricingSourceBuilder}
 import com.hsoft.hmm.posman.api.position.container.RiskPositionDetailsContainer
+import com.ingalys.imc.BuySell
 import com.ingalys.imc.depth.DepthOrder
 import com.ingalys.imc.summary.Summary
 import horizontrader.plugins.hmm.connections.service.IDictionaryProvider
@@ -36,46 +37,48 @@ trait Controller extends NativeController {
       .filter(d => d.getUlId == ulId && d.getProductType == ProductTypes.WARRANT)
       .map(p => getService[InstrumentInfoService].getInstrumentByUniqueId(exchangeName, p.getId) )
       .toList
-      
-  def getProjectedPrice(inDe: InstrumentDescriptor): Option[Double] = source[Summary].get(inDe).latest.flatMap(_.theoOpenPrice) 
-  def getProjectedVolume(inDe: InstrumentDescriptor): Option[Long] = source[Summary].get(inDe).latest.flatMap(_.theoOpenVolume)
+
+  def getProjectedPrice(inDe: InstrumentDescriptor): Option[Double] = source[Summary].get(inDe).latest.flatMap(_.theoOpenPrice)
+  def getProjectedVolume(inDe: InstrumentDescriptor): Option[Long] = source[Summary].get(inDe).latest. flatMap(_.theoOpenVolume)
 
   def getOwnMatchedOrder(projectedPrice: Double, projectedVolume: Double): Int = ???
-  def getDelta(dwId: String) = source[Pricing].get(dwId,"DEFAULT").latest.get.delta
+  def getDelta(dwId: String): Option[Double] = source[Pricing].get(dwId,"DEFAULT").latest.map(_.delta) // negative = put
 
-  def calcResidual(dwList: List[InstrumentDescriptor]) =
-    (dwList, dwList.map(p => getDelta(p.getUniqueId)), dwList.map(getProjectedVolume))
+  def calcResidual(dwList: List[InstrumentDescriptor]) = // negative = offer/sell order
+    (dwList.map(p => getDelta(p.getUniqueId)), dwList.map(getProjectedVolume))
       .zipped
       .toList
       .map {
-        case (_, delta, Some(vol)) => delta * vol
+        case (Some(delta), Some(vol)) => vol * Math.abs(delta) // if delta can be negative then make it absolute
         case _ => 0
       }
       .sum
 
-  def calcTotalResidual(dwList: List[InstrumentDescriptor], ul: InstrumentDescriptor) = 
+  def calcTotalResidual(dwList: List[InstrumentDescriptor], ul: InstrumentDescriptor) =
     calcResidual(dwList) + calcResidual(List(ul))
-  
-  
+
+
   def main: Unit = {
     val dwList = getDwList(dictionaryService, ulId)
-    
+
     val dwProjectedPriceList = dwList.map(getProjectedPrice)
     val dwProjectedVolumeList = dwList.map(getProjectedVolume)
     val deltaList = dwList.map(p => getDelta(p.getUniqueId))
     val totalResidual = calcTotalResidual(dwList, ulInstrument)
-    val ownMatchedOrderList = (dwProjectedPriceList, dwProjectedVolumeList)
+    val ownMatchedOrderList = (dwProjectedPriceList, dwProjectedVolumeList, deltaList)
       .zipped
       .toList
       .map{
-        case (Some(price), Some(vol)) => getOwnMatchedOrder(price, vol)
+        case (Some(price), Some(vol), Some(delta)) => getOwnMatchedOrder(price, vol) * Math.abs(delta)
         case _ => 0
       }
-    // send own order to main calculation 
+    val preMainOrder = ownMatchedOrderList.sum + totalResidual
+    
+    // send own order to main calculation
   }
-  
+
   onMessage {
-        
+
     case Load =>
       /*
         Get all derivative warrants
@@ -135,7 +138,7 @@ trait Controller extends NativeController {
       val delta = ssDwPTT24CA_pricingSource.latest.get.delta
 
     /*
-    
+
       Get residual
       Nop: Sum(ProjDWMatchQty*delta)
       PTT
@@ -157,16 +160,16 @@ trait Controller extends NativeController {
       /*
         Revisit:
         Get direction (ask / bid)
-  
+
           Method 1:
           Projected price <= automation best bid : CALL Sell UL
           Projected price >= automation best ask : CALL Buy UL
           Projected price <= automation best bid : PUTDW Buy UL
           Projected price >= automation best ask : PUTDW Sell UL
-  
+
           Method2:
           Look at the name of the dw market
-  
+
        */
 
 
