@@ -147,6 +147,8 @@ class Algo[F[_]: Monad](
         b <- EitherT.fromEither[F](if(a) Right(()) else Left(StateError("Cannot process, there are orders pending")))
       } yield b
 
+
+  // called everytime ul price changes
   def handleOnSignal(dwId: String): F[Either[Error, String]] = (for {
     _ <- checkPendingOrderAction()
     a <- EitherT.right[Error](process(dwId))

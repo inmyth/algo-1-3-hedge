@@ -1,5 +1,7 @@
 # Algo-1-3 Hedge V2
 
+Lot size = ulInstrument.getLotSizeD
+
 
 Read me here
 Controller flow: (to be deleted)
