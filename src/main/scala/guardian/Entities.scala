@@ -16,7 +16,21 @@ object Entities {
   }
 
 
-  case class DwData(projVolume: Long, projPrice: Double)
+  sealed trait Direction
+  object Direction {
+    case object SELL extends Direction
+    case object BUY extends Direction
+  }
+
+  sealed trait PutCall
+  object PutCall{
+    case object PUT extends PutCall
+    case object CALL extends PutCall
+  }
+
+  case class DwData(projVolume: Long, projPrice: Double, direction: Direction)
+
+
 
   //  def getMarketMakerBid(): F[Error Either BigDecimal]
 

@@ -10,7 +10,7 @@ import com.ingalys.imc.depth.Depth
 import com.ingalys.imc.order.Order
 import com.ingalys.imc.summary.Summary
 import guardian.Algo._
-import guardian.Entities.{DwData, OrderAction}
+import guardian.Entities.{DwData, OrderAction, Portfolio}
 import guardian.Entities.OrderAction.{CancelOrder, InsertOrder, UpdateOrder}
 import guardian.Error.{MarketError, StateError, UnknownError}
 import horizontrader.services.instruments.InstrumentDescriptor
@@ -26,25 +26,13 @@ class Algo[F[_]: Monad](
             val pendingOrdersRepo: PendingOrdersAlgebra[F],
             val pendingCalculationRepo: PendingCalculationAlgebra[F],
             underlyingSymbol: String, //PTT, Delta
-            dwMap: Map[String, Source[Summary]],
+//            dwMap: Map[String, Source[Summary]],
+            preMain: () => Either[Error, List[Order]],
             sendOrder: (String, Double) => Unit,
             logAlert: (String) => Unit
           ) {
 
-  def calculateOrder(dwData: DwData): F[Order] = Monad[F].pure(
 
-    createOrder(666L, 122.0, BuySell.BUY, UUID.randomUUID().toString)
-  )
-
-  def getDWData(id: String): EitherT[F, Error, DwData] = for {
-    a <- EitherT.fromEither[F](dwMap.get(id).fold[Either[Error, Source[Summary]]](Left(MarketError(s"DW Market not available, id:$id")))(p => Right(p)))
-    b <- EitherT.fromEither[F](a.latest.fold[Either[Error, DwData]](Left(MarketError(s"DW latest data not available, id:$id")))(p => {Right(DwData(10L, 20.0))}))
-  } yield b
-
-
-  /*
-   portfolio
-   */
   def createOrderActions(order: Order): F[List[OrderAction]] = for {
     a <- liveOrdersRepo.getOrdersByTimeSortedDown(underlyingSymbol)
     b <- Monad[F].pure(calcTotalQty(a))
@@ -73,6 +61,7 @@ class Algo[F[_]: Monad](
       }
     }
   } yield d
+
 
   def calcTotalQty(orders: List[Order]): Long = orders.foldLeft(0L)((a: Long, b: Order) => a + b.getQuantityL)
 
@@ -126,11 +115,10 @@ class Algo[F[_]: Monad](
   }
 
   def process(dwId: String): F[List[OrderAction]] = (for {
-    a <- getDWData(dwId)
-    b <- EitherT.right[Error](calculateOrder(a))
-    c <- EitherT.right[Error](createOrderActions(b))
+    b <- EitherT.fromEither[F](preMain())
+    c <- EitherT.right[Error](b.map(createOrderActions).sequence)
   } yield c).value.map{
-    case Right(v) => v
+    case Right(v) => v.flatten
     case Left(e) =>
       logAlert(e.msg)
       List.empty[OrderAction]
@@ -148,6 +136,8 @@ class Algo[F[_]: Monad](
       } yield b
 
 
+  // CALLED WHEN SIGNAL
+
   // called everytime ul price changes
   def handleOnSignal(dwId: String): F[Either[Error, String]] = (for {
     _ <- checkPendingOrderAction()
@@ -162,22 +152,27 @@ class Algo[F[_]: Monad](
   }
 
   def handleOnOrderAck(id: String): EitherT[F, Error, Unit] =
-    (for {
+    for {
     a <- getPendingOrderAction(id)
     _ <- EitherT.right[Error](updateLiveOrders(a))
     _ <- EitherT.right[Error](pendingOrdersRepo.remove(id))
     d <- EitherT.right[Error](pendingCalculationRepo.getAll)
     e <- EitherT.right[Error](d.map(handleOnSignal).sequence)
     _ <- EitherT.right[Error](e.filter(_.isRight).map(p => pendingCalculationRepo.remove(p.toOption.get)).sequence)
-  } yield ())
+  } yield ()
 
   def handleOnOrderNak(id: String, errorMsg: String): EitherT[F, Error, Unit] =
-    (for {
+    for {
       _ <- EitherT.right[Error](Monad[F].pure(
         logAlert(errorMsg)
       ))
       _ <- handleOnOrderAck(id)
-    } yield ())
+    } yield ()
+
+  // second init on Load signal
+  def handleOnLoad(ulId: String, qty: Long) = for {
+    _ <- EitherT.right[Error](portfolioRepo.put(ulId, Portfolio(ulId, qty)))
+  } yield()
 
 }
 
@@ -191,8 +186,10 @@ object Algo{
     o
   }
 
+
+
   @tailrec
-  def getPriceAfterTicks(isPlus: Boolean, ticks: Int, price: BigDecimal): BigDecimal = {
+  def getPriceAfterTicks(isPlus: Boolean, price: BigDecimal, ticks: Int = 5): BigDecimal = {
     if(ticks < 1){
       price
     }
@@ -219,10 +216,6 @@ object Algo{
   }
 
 
-  /*
-  Projected price <= automation best bid : CALL Sell UL
-  Projected price >= automation best ask : CALL Buy UL
-  Projected price <= automation best bid : PUTDW Buy UL
-  Projected price >= automation best ask : PUTDW Sell UL
-   */
+
+
 }
