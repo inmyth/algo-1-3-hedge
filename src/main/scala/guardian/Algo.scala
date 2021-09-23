@@ -223,7 +223,6 @@ object Algo {
     if (ticks < 1) {
       price
     } else {
-      println(if (isPlus) price + SETChkSpread(price, isPlus) else price - SETChkSpread(price, isPlus))
       getPriceAfterTicks(
         isPlus,
         (if (isPlus) price + SETChkSpread(price, isPlus) else price - SETChkSpread(price, isPlus))
