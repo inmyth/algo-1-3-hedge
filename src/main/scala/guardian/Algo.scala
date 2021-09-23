@@ -1,7 +1,7 @@
 package guardian
 
 import algotrader.api.source.Source
-import cats.Monad
+import cats.{Applicative, Monad}
 import cats.data.EitherT
 import cats.implicits._
 import com.hsoft.hmm.api.automaton.Automaton
@@ -10,7 +10,7 @@ import com.ingalys.imc.depth.Depth
 import com.ingalys.imc.order.Order
 import com.ingalys.imc.summary.Summary
 import guardian.Algo._
-import guardian.Entities.{DwData, OrderAction, Portfolio}
+import guardian.Entities.{CustomId, Direction, DwData, OrderAction, Portfolio}
 import guardian.Entities.OrderAction.{CancelOrder, InsertOrder, UpdateOrder}
 import guardian.Error.{MarketError, StateError, UnknownError}
 import horizontrader.services.instruments.InstrumentDescriptor
@@ -20,18 +20,16 @@ import scala.annotation.tailrec
 import scala.collection.mutable.ListBuffer
 import scala.language.higherKinds
 
-class Algo[F[_]: Monad](
+class Algo[F[_]: Applicative: Monad](
     val liveOrdersRepo: LiveOrdersRepoAlgebra[F],
     val portfolioRepo: UnderlyingPortfolioAlgebra[F],
     val pendingOrdersRepo: PendingOrdersAlgebra[F],
     val pendingCalculationRepo: PendingCalculationAlgebra[F],
-    underlyingSymbol: String, //PTT, Delta
-//            dwMap: Map[String, Source[Summary]],
-    preMain: () => Either[Error, Order],
-    sendOrder: (String, Double) => Unit,
-    logAlert: (String) => Unit
+    underlyingSymbol: String,
+    preProcess: EitherT[F, Error, Order],
+    sendOrder: (OrderAction) => Order,
+    logAlert: String => Unit
 ) {
-
   def createOrderActions(order: Order): F[List[OrderAction]] =
     for {
       a <- liveOrdersRepo.getOrdersByTimeSortedDown(underlyingSymbol)
@@ -65,7 +63,7 @@ class Algo[F[_]: Monad](
 
   def calcTotalQty(orders: List[Order]): Long = orders.foldLeft(0L)((a: Long, b: Order) => a + b.getQuantityL)
 
-  val createCancelOrder: Order => OrderAction = o => CancelOrder(o.getId)
+  val createCancelOrder: Order => OrderAction = o => CancelOrder(o)
 
   def createInsertOrder(wantQty: Long, price: Double, buySell: Int, availableQty: Long): Option[OrderAction] = {
     buySell match {
@@ -73,11 +71,11 @@ class Algo[F[_]: Monad](
         if (availableQty <= 0L) {
           None
         } else if (availableQty <= wantQty) {
-          Some(InsertOrder(createOrder(availableQty, price, buySell, UUID.randomUUID().toString)))
+          Some(InsertOrder(createOrder(availableQty, price, buySell, CustomId.generate)))
         } else {
-          Some(InsertOrder(createOrder(wantQty, price, buySell, UUID.randomUUID().toString)))
+          Some(InsertOrder(createOrder(wantQty, price, buySell, CustomId.generate)))
         }
-      case _ => Some(InsertOrder(createOrder(wantQty, price, buySell, UUID.randomUUID().toString)))
+      case _ => Some(InsertOrder(createOrder(wantQty, price, buySell, CustomId.generate)))
     }
   }
 
@@ -91,33 +89,36 @@ class Algo[F[_]: Monad](
     val liveQty      = rest.foldLeft(0L)((x: Long, y: Order) => x + y.getQuantityL)
     if (liveQty < calculatedQuantity) {
       val remainder = calculatedQuantity - liveQty
-      val o         = createOrder(remainder, head.getPrice, head.getBuySell, head.getId)
+      val o         = cloneModifyOrder(head, remainder, head.getPrice, head.getBuySell)
       res += UpdateOrder(o)
       res.toList
     } else if (liveQty == calculatedQuantity) {
-      res += CancelOrder(head.getId)
+      res += CancelOrder(head)
       res.toList
     } else {
-      res += CancelOrder(head.getId)
+      res += CancelOrder(head)
       trimLiveOrders(rest, calculatedQuantity, res)
     }
+  }
+
+  def cloneModifyOrder(o: Order, newQty: Long, newPrice: Double, newDirection: Int) = {
+    val newOrder = o.deepClone().asInstanceOf[Order]
+    newOrder.setPrice(newPrice)
+    newOrder.setQuantity(newQty)
+    newOrder.setBuySell(newDirection)
+    newOrder
   }
 
   def updateLiveOrders(act: OrderAction): F[Unit] =
     act match {
       case InsertOrder(order) => liveOrdersRepo.putOrder(underlyingSymbol, order)
       case UpdateOrder(order) => liveOrdersRepo.putOrder(underlyingSymbol, order)
-      case CancelOrder(id)    => liveOrdersRepo.removeOrder(underlyingSymbol, id)
-    }
-
-  def sendOrderAction(act: OrderAction): F[Unit] =
-    Monad[F].pure {
-      sendOrder("a", 2.0)
+      case CancelOrder(order) => liveOrdersRepo.removeOrder(underlyingSymbol, order.getId)
     }
 
   def process(dwId: String): F[List[OrderAction]] =
     (for {
-      b <- EitherT.fromEither[F](preMain())
+      b <- preProcess
       c <- EitherT.right[Error](createOrderActions(b))
     } yield c).value.map {
       case Right(v) => v
@@ -126,11 +127,13 @@ class Algo[F[_]: Monad](
         List.empty[OrderAction]
     }
 
-  def getPendingOrderAction(dwId: String): EitherT[F, Error, OrderAction] =
+  def getPendingOrderAction(customId: CustomId): EitherT[F, Error, OrderAction] =
     for {
-      a <- EitherT.liftF[F, Error, Option[OrderAction]](pendingOrdersRepo.get(dwId))
+      a <- EitherT.liftF[F, Error, Option[OrderAction]](pendingOrdersRepo.get(customId))
       b <- EitherT.fromEither[F](
-        a.fold[Either[Error, OrderAction]](Left(UnknownError(s"Pending order not found, dwId:$dwId")))(p => Right(p))
+        a.fold[Either[Error, OrderAction]](Left(UnknownError(s"Pending order not found, custom id:${customId.v}")))(p =>
+          Right(p)
+        )
       )
     } yield b
 
@@ -147,7 +150,7 @@ class Algo[F[_]: Monad](
     (for {
       _ <- checkPendingOrderAction()
       a <- EitherT.right[Error](process(dwId))
-      _ <- EitherT.right[Error](a.map(sendOrderAction).sequence)
+      b <- EitherT.right[Error](a.map(p => Monad[F].pure(sendOrder(p))).sequence)
       _ <- EitherT.right[Error](a.map(pendingOrdersRepo.put).sequence)
     } yield dwId).value.map {
       case Right(v) => Right(v)
@@ -156,24 +159,24 @@ class Algo[F[_]: Monad](
         Left(e)
     }
 
-  def handleOnOrderAck(id: String): EitherT[F, Error, Unit] =
+  def handleOnOrderAck(customId: CustomId): EitherT[F, Error, Unit] =
     for {
-      a <- getPendingOrderAction(id)
+      a <- getPendingOrderAction(customId)
       _ <- EitherT.right[Error](updateLiveOrders(a))
-      _ <- EitherT.right[Error](pendingOrdersRepo.remove(id))
+      _ <- EitherT.right[Error](pendingOrdersRepo.remove(customId))
       d <- EitherT.right[Error](pendingCalculationRepo.getAll)
       e <- EitherT.right[Error](d.map(handleOnSignal).sequence)
       _ <- EitherT.right[Error](e.filter(_.isRight).map(p => pendingCalculationRepo.remove(p.toOption.get)).sequence)
     } yield ()
 
-  def handleOnOrderNak(id: String, errorMsg: String): EitherT[F, Error, Unit] =
+  def handleOnOrderNak(customId: CustomId, errorMsg: String): EitherT[F, Error, Unit] =
     for {
       _ <- EitherT.right[Error](
         Monad[F].pure(
           logAlert(errorMsg)
         )
       )
-      _ <- handleOnOrderAck(id)
+      _ <- handleOnOrderAck(customId)
     } yield ()
 
   // second init on Load signal
@@ -185,12 +188,33 @@ class Algo[F[_]: Monad](
 }
 
 object Algo {
-  def createOrder(qty: Long, prc: Double, buysell: Int, id: String): Order = {
+  def apply[F[_]: Monad](
+      liveOrdersRepo: LiveOrdersRepoAlgebra[F],
+      portfolioRepo: UnderlyingPortfolioAlgebra[F],
+      pendingOrdersRepo: PendingOrdersAlgebra[F],
+      pendingCalculationRepo: PendingCalculationAlgebra[F],
+      underlyingSymbol: String,
+      preProcess: EitherT[F, Error, Order],
+      sendOrder: (OrderAction) => Order,
+      logAlert: String => Unit
+  ): Algo[F] =
+    new Algo(
+      liveOrdersRepo,
+      portfolioRepo,
+      pendingOrdersRepo,
+      pendingCalculationRepo,
+      underlyingSymbol,
+      preProcess,
+      sendOrder,
+      logAlert
+    )
+
+  def createOrder(qty: Long, prc: Double, buysell: Int, customId: CustomId): Order = {
     val o = new Order()
     o.setQuantity(qty)
     o.setPrice(prc)
     o.setBuySell(buysell)
-    o.setId(id)
+    o.setCustomField(CustomId.field, customId.v)
     o
   }
 
@@ -202,9 +226,9 @@ object Algo {
       println(if (isPlus) price + SETChkSpread(price, isPlus) else price - SETChkSpread(price, isPlus))
       getPriceAfterTicks(
         isPlus,
-        ticks - 1,
         (if (isPlus) price + SETChkSpread(price, isPlus) else price - SETChkSpread(price, isPlus))
-          .setScale(2, BigDecimal.RoundingMode.HALF_UP)
+          .setScale(2, BigDecimal.RoundingMode.HALF_UP),
+        ticks - 1
       )
     }
   }

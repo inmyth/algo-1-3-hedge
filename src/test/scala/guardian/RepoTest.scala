@@ -1,29 +1,18 @@
 package guardian
 
 import cats.Id
-import cats.implicits._
 import com.ingalys.imc.BuySell
 import guardian.Entities.OrderAction.{CancelOrder, InsertOrder, UpdateOrder}
-import guardian.Entities.{OrderAction, Portfolio}
+import guardian.Entities.Portfolio
+import guardian.Fixtures._
 import org.scalatest.flatspec.AnyFlatSpec
-import guardian.Fixtures.createOrder
 import org.scalatest.matchers.should.Matchers.convertToAnyShouldWrapper
 
-class RepoTest extends AnyFlatSpec{
+class RepoTest extends AnyFlatSpec {
 
   behavior of "LiveOrdersInMem"
 
-
   val liveRepo = new LiveOrdersInMemInterpreter[Id]
-
-  val id1 = "id1"
-  val liveOrders = List(
-    createOrder(id1, 1L,  100L, 50.0, BuySell.BUY),
-    createOrder("id2", 11L, 90L, 50.0, BuySell.BUY),
-    createOrder("id3", 111L, 30L, 50.0, BuySell.BUY)
-  )
-
-  val symbol: String = "PTT"
 
   it should "append order, return all orders sorted by time down, remove order" in {
     liveOrders.foreach(liveRepo.putOrder(symbol, _))
@@ -45,7 +34,7 @@ class RepoTest extends AnyFlatSpec{
 
   it should "put, get portfolio" in {
     val position = 55500L
-    val p = Portfolio(symbol, position )
+    val p        = Portfolio(symbol, position)
 
     ulRepo.put(symbol, p)
     val b = ulRepo.get(symbol)
@@ -60,13 +49,13 @@ class RepoTest extends AnyFlatSpec{
     pendingOrdersRepo.put(a)
     pendingOrdersRepo.put(a)
 
-    val b = pendingOrdersRepo.get(id1)
+    val b = pendingOrdersRepo.get(customId1)
     b.isDefined shouldBe true
     b.get.isInstanceOf[InsertOrder] shouldBe true
     b.get.asInstanceOf[InsertOrder].order.getId shouldBe id1
 
-    pendingOrdersRepo.remove(id1)
-    val c = pendingOrdersRepo.get(id1)
+    pendingOrdersRepo.remove(customId1)
+    val c = pendingOrdersRepo.get(customId1)
     c shouldBe None
   }
 
@@ -74,27 +63,27 @@ class RepoTest extends AnyFlatSpec{
     val a = UpdateOrder(liveOrders.head)
     pendingOrdersRepo.put(a)
 
-    val b = pendingOrdersRepo.get(id1)
+    val b = pendingOrdersRepo.get(customId1)
     b.isDefined shouldBe true
     b.get.isInstanceOf[UpdateOrder] shouldBe true
     b.get.asInstanceOf[UpdateOrder].order.getId shouldBe id1
 
-    pendingOrdersRepo.remove(id1)
-    val c = pendingOrdersRepo.get(id1)
+    pendingOrdersRepo.remove(customId1)
+    val c = pendingOrdersRepo.get(customId1)
     c shouldBe None
   }
 
   it should "put, get, remove CancelOrder" in {
-    val a = CancelOrder(id1)
+    val a = CancelOrder(liveOrders.head)
     pendingOrdersRepo.put(a)
 
-    val b = pendingOrdersRepo.get(id1)
+    val b = pendingOrdersRepo.get(customId1)
     b.isDefined shouldBe true
     b.get.isInstanceOf[CancelOrder] shouldBe true
-    b.get.asInstanceOf[CancelOrder].id shouldBe id1
+    b.get.asInstanceOf[CancelOrder].order.getId shouldBe id1
 
-    pendingOrdersRepo.remove(id1)
-    val c = pendingOrdersRepo.get(id1)
+    pendingOrdersRepo.remove(customId1)
+    val c = pendingOrdersRepo.get(customId1)
     c shouldBe None
   }
 
