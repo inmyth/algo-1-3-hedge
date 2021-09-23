@@ -28,7 +28,9 @@ class AlgoTest extends AnyFlatSpec {
       underlyingSymbol = symbol,
       preProcess = EitherT.fromEither(Right(liveOrders.head)),
       sendOrder = (_: OrderAction) => liveOrders.head,
-      logAlert = (s: String) => (println(s))
+      logAlert = (s: String) => println(s),
+      logInfo = (s: String) => println(s),
+      logError = (s: String) => println(s)
     )
   }
 

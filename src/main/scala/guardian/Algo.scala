@@ -22,7 +22,9 @@ class Algo[F[_]: Applicative: Monad](
     underlyingSymbol: String,
     preProcess: EitherT[F, Error, Order],
     sendOrder: (OrderAction) => Order,
-    logAlert: String => Unit
+    logAlert: String => Unit,
+    logInfo: String => Unit,
+    logError: String => Unit
 ) {
   def createOrderActions(order: Order): F[List[OrderAction]] =
     for {
@@ -184,7 +186,7 @@ class Algo[F[_]: Applicative: Monad](
 }
 
 object Algo {
-  def apply[F[_]: Monad](
+  def apply[F[_]: Applicative: Monad](
       liveOrdersRepo: LiveOrdersRepoAlgebra[F],
       portfolioRepo: UnderlyingPortfolioAlgebra[F],
       pendingOrdersRepo: PendingOrdersAlgebra[F],
@@ -192,7 +194,9 @@ object Algo {
       underlyingSymbol: String,
       preProcess: EitherT[F, Error, Order],
       sendOrder: (OrderAction) => Order,
-      logAlert: String => Unit
+      logAlert: String => Unit,
+      logInfo: String => Unit,
+      logError: String => Unit
   ): Algo[F] =
     new Algo(
       liveOrdersRepo,
@@ -202,7 +206,9 @@ object Algo {
       underlyingSymbol,
       preProcess,
       sendOrder,
-      logAlert
+      logAlert,
+      logInfo,
+      logError
     )
 
   def createOrder(qty: Long, prc: Double, buysell: Int, customId: CustomId): Order = {
