@@ -1,21 +1,15 @@
 package guardian
 
-import algotrader.api.source.Source
-import cats.{Applicative, Monad}
 import cats.data.EitherT
 import cats.implicits._
-import com.hsoft.hmm.api.automaton.Automaton
+import cats.{Applicative, Monad}
 import com.ingalys.imc.BuySell
-import com.ingalys.imc.depth.Depth
 import com.ingalys.imc.order.Order
-import com.ingalys.imc.summary.Summary
 import guardian.Algo._
-import guardian.Entities.{CustomId, Direction, DwData, OrderAction, Portfolio}
 import guardian.Entities.OrderAction.{CancelOrder, InsertOrder, UpdateOrder}
-import guardian.Error.{MarketError, StateError, UnknownError}
-import horizontrader.services.instruments.InstrumentDescriptor
+import guardian.Entities.{CustomId, OrderAction, Portfolio}
+import guardian.Error.UnknownError
 
-import java.util.UUID
 import scala.annotation.tailrec
 import scala.collection.mutable.ListBuffer
 import scala.language.higherKinds
