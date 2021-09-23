@@ -275,7 +275,7 @@ class AlgoTest extends AnyFlatSpec {
     val x = for {
       a <- Monad[Id].pure(createApp[Id](symbol))
       _ <- a.pendingOrdersRepo.put(InsertOrder(rawOrderBuy))
-      c <- a.checkPendingOrderAction()
+      c <- a.checkAndUpdatePendingOrderAndCalculation()
     } yield c
     x.isLeft shouldBe true
   }
@@ -283,7 +283,7 @@ class AlgoTest extends AnyFlatSpec {
   it should "return Right when it pending orders empty " in {
     val x = for {
       a <- Monad[Id].pure(createApp[Id](symbol))
-      c <- a.checkPendingOrderAction()
+      c <- a.checkAndUpdatePendingOrderAndCalculation()
     } yield c
     x.isRight shouldBe true
   }
@@ -296,7 +296,7 @@ class AlgoTest extends AnyFlatSpec {
     val x = for {
       a <- Monad[Id].pure(createApp[Id](symbol))
       _ <- a.pendingOrdersRepo.put(InsertOrder(rawOrderBuy))
-      c <- a.handleOnSignal(dw1)
+      c <- a.handleOnSignal()
     } yield c
     x.isLeft shouldBe true
   }
@@ -304,7 +304,7 @@ class AlgoTest extends AnyFlatSpec {
   it should "return Right if pendingComputation is empty" in {
     val x = for {
       a <- Monad[Id].pure(createApp[Id](symbol))
-      b <- a.handleOnSignal(dw1)
+      b <- a.handleOnSignal()
     } yield b
     x.isRight shouldBe true
   }

@@ -102,27 +102,26 @@ class PendingOrdersInMemInterpreter[F[_]: Applicative] extends PendingOrdersAlge
 
 abstract class PendingCalculationAlgebra[F[_]] {
 
-  def put(derivativeSymbol: String): F[Unit]
+  def activate(): F[Unit]
 
-  def remove(derivativeSymbol: String): F[Unit]
+  def deactivate(): F[Unit]
 
-  def getAll: F[List[String]]
+  def shouldRecalculate: F[Boolean]
 
 }
 
 class PendingCalculationInMemInterpreter[F[_]: Applicative] extends PendingCalculationAlgebra[F] {
-  private var db: Set[String] = Set.empty
+  private var db: Boolean = false
 
-  override def put(derivativeSymbol: String): F[Unit] = {
-    db += derivativeSymbol
+  override def activate(): F[Unit] = {
+    db = true
     Applicative[F].unit
   }
 
-  override def remove(derivativeSymbol: String): F[Unit] = {
-    db -= derivativeSymbol
+  override def deactivate(): F[Unit] = {
+    db = false
     Applicative[F].unit
   }
 
-  override def getAll: F[List[String]] = Applicative[F].pure(db.toList)
-
+  override def shouldRecalculate: F[Boolean] = Applicative[F].pure(db)
 }

@@ -91,12 +91,12 @@ class RepoTest extends AnyFlatSpec {
   val pendingCalculationRepo = new PendingCalculationInMemInterpreter[Id]()
 
   it should "put, remove, getAll" in {
-    pendingCalculationRepo.put(symbol)
-    val a = pendingCalculationRepo.getAll
-    a.size shouldBe 1
+    pendingCalculationRepo.activate()
+    val a = pendingCalculationRepo.shouldRecalculate
+    a shouldBe true
 
-    pendingCalculationRepo.remove(symbol)
-    val b = pendingCalculationRepo.getAll
-    b.size shouldBe 0
+    pendingCalculationRepo.deactivate()
+    val b = pendingCalculationRepo.shouldRecalculate
+    b shouldBe false
   }
 }

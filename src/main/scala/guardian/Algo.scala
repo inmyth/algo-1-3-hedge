@@ -101,7 +101,7 @@ class Algo[F[_]: Applicative: Monad](
     }
   }
 
-  def cloneModifyOrder(o: Order, newQty: Long, newPrice: Double, newDirection: Int) = {
+  def cloneModifyOrder(o: Order, newQty: Long, newPrice: Double, newDirection: Int): Order = {
     val newOrder = o.deepClone().asInstanceOf[Order]
     newOrder.setPrice(newPrice)
     newOrder.setQuantity(newQty)
@@ -116,7 +116,7 @@ class Algo[F[_]: Applicative: Monad](
       case CancelOrder(order) => liveOrdersRepo.removeOrder(underlyingSymbol, order.getId)
     }
 
-  def process(dwId: String): F[List[OrderAction]] =
+  def process(): F[List[OrderAction]] =
     (for {
       b <- preProcess
       c <- EitherT.right[Error](createOrderActions(b))
@@ -137,23 +137,25 @@ class Algo[F[_]: Applicative: Monad](
       )
     } yield b
 
-  def checkPendingOrderAction(): EitherT[F, StateError, Unit] =
+  def checkAndUpdatePendingOrderAndCalculation(): EitherT[F, Error, Unit] =
     for {
-      a <- EitherT.right[StateError](pendingOrdersRepo.isEmpty)
-      b <- EitherT.fromEither[F](if (a) Right(()) else Left(StateError("Cannot process, there are orders pending")))
+      a <- EitherT.right[Error](pendingOrdersRepo.isEmpty)
+      _ <- EitherT.right[Error](if (a) pendingCalculationRepo.activate() else Applicative[F].pure(()))
+      b <- EitherT.fromEither[F](isPendingError(a))
     } yield b
 
+  private def isPendingError(a: Boolean): Either[Error, Unit] = Either.cond(a, (), Error.PendingError)
   // CALLED WHEN SIGNAL
 
   // called everytime ul price changes
-  def handleOnSignal(dwId: String): F[Either[Error, String]] =
+  def handleOnSignal(): F[Either[Error, Unit]] =
     (for {
-      _ <- checkPendingOrderAction()
-      a <- EitherT.right[Error](process(dwId))
-      b <- EitherT.right[Error](a.map(p => Monad[F].pure(sendOrder(p))).sequence)
+      _ <- checkAndUpdatePendingOrderAndCalculation()
+      a <- EitherT.right[Error](process())
+      _ <- EitherT.right[Error](a.map(p => Monad[F].pure(sendOrder(p))).sequence)
       _ <- EitherT.right[Error](a.map(pendingOrdersRepo.put).sequence)
-    } yield dwId).value.map {
-      case Right(v) => Right(v)
+    } yield ()).value.map {
+      case Right(_) => Right(())
       case Left(e) =>
         logAlert(e.msg)
         Left(e)
@@ -164,9 +166,9 @@ class Algo[F[_]: Applicative: Monad](
       a <- getPendingOrderAction(customId)
       _ <- EitherT.right[Error](updateLiveOrders(a))
       _ <- EitherT.right[Error](pendingOrdersRepo.remove(customId))
-      d <- EitherT.right[Error](pendingCalculationRepo.getAll)
-      e <- EitherT.right[Error](d.map(handleOnSignal).sequence)
-      _ <- EitherT.right[Error](e.filter(_.isRight).map(p => pendingCalculationRepo.remove(p.toOption.get)).sequence)
+      d <- EitherT.right[Error](pendingCalculationRepo.shouldRecalculate)
+      _ <- if (d) EitherT.liftF(handleOnSignal()) else EitherT.rightT[F, Error](())
+      _ <- EitherT.right[Error](pendingCalculationRepo.deactivate())
     } yield ()
 
   def handleOnOrderNak(customId: CustomId, errorMsg: String): EitherT[F, Error, Unit] =
