@@ -1,8 +1,10 @@
 package guardian
 
-sealed trait Error
+sealed abstract class Error(val msg: String)
 object Error {
-  final case class UnexpectedError(msg: String) extends Error
-  final case class ValidationError(msg: String) extends Error
+  final case class UnknownError(m: String)    extends Error(m)
+  final case class ValidationError(m: String) extends Error(m)
+  final case class MarketError(m: String)     extends Error(m)
+  final case class StateError(m: String)      extends Error(m)
+  final case object PendingError              extends Error("There are pending order")
 }
-

@@ -1,9 +1,8 @@
 package guardian
 
-import cats.{Applicative, Monad}
+import cats.Applicative
 import com.ingalys.imc.order.Order
-import guardian.Entities.Portfolio
-import guardian.Error.UnexpectedError
+import guardian.Entities.{CustomId, OrderAction, Portfolio}
 
 import scala.language.higherKinds
 
@@ -28,7 +27,9 @@ class LiveOrdersInMemInterpreter[F[_]: Applicative] extends LiveOrdersRepoAlgebr
   }
 
   override def getOrdersByTimeSortedDown(symbol: String): F[List[Order]] =
-    Applicative[F].pure(db.getOrElse(symbol, Map.empty).values.toList.sortWith(_.getTimestampNanos > _.getTimestampNanos))
+    Applicative[F].pure(
+      db.getOrElse(symbol, Map.empty).values.toList.sortWith(_.getTimestampNanos > _.getTimestampNanos)
+    )
 
   override def getOrder(symbol: String, id: String): F[Option[Order]] =
     Applicative[F].pure {
@@ -44,78 +45,83 @@ class LiveOrdersInMemInterpreter[F[_]: Applicative] extends LiveOrdersRepoAlgebr
 
 abstract class UnderlyingPortfolioAlgebra[F[_]] {
 
-
   def put(symbol: String, portfolio: Portfolio): F[Unit]
 
   def get(symbol: String): F[Portfolio]
 
 }
 
-class UnderlyingPortfolioInterpreter[F[_]: Monad] extends UnderlyingPortfolioAlgebra[F] {
+class UnderlyingPortfolioInterpreter[F[_]: Applicative] extends UnderlyingPortfolioAlgebra[F] {
 
   private var db: Map[String, Portfolio] = Map.empty
 
   override def put(symbol: String, portfolio: Portfolio): F[Unit] = {
     db += (symbol -> portfolio)
-    Monad[F].unit
+    Applicative[F].unit
   }
 
   override def get(symbol: String): F[Portfolio] =
-    Monad[F].pure(db.getOrElse(symbol, Portfolio(symbol, 0)))
+    Applicative[F].pure(db.getOrElse(symbol, Portfolio(symbol, 0)))
 
 }
 
 abstract class PendingOrdersAlgebra[F[_]] {
 
-  def add(order: Order): F[Unit]
+  def put(act: OrderAction): F[Unit]
 
-  def get(id: String): F[Error Either Order]
+  def get(customId: CustomId): F[Option[OrderAction]]
 
-  def remove(id: String): F[Unit]
+  def remove(customId: CustomId): F[Unit]
+
+  def isEmpty: F[Boolean]
 
 }
 
-class PendingOrdersInMemInterpreter[F[_]: Monad] extends PendingOrdersAlgebra[F] {
-  private var db: Map[String, Order] = Map.empty
+class PendingOrdersInMemInterpreter[F[_]: Applicative] extends PendingOrdersAlgebra[F] {
+  private var db: Map[String, OrderAction] = Map.empty
 
-  override def add(order: Order): F[Unit] = {
-    db += (order.getId -> order)
-    Monad[F].unit
+  override def put(act: OrderAction): F[Unit] = {
+    act match {
+      case OrderAction.InsertOrder(order) => db += (CustomId.fromOrder(order).v -> act)
+      case OrderAction.UpdateOrder(order) => db += (CustomId.fromOrder(order).v -> act)
+      case OrderAction.CancelOrder(order) => db += (CustomId.fromOrder(order).v -> act)
+    }
+    Applicative[F].unit
   }
 
-  override def get(id: String): F[Error Either Order] =
-    Monad[F].pure(
-      db.get(id).fold[Either[Error, Order]](Left(UnexpectedError(s"Pending order not found $id")))(p => Right(p))
-    )
+  override def get(customId: CustomId): F[Option[OrderAction]] =
+    Applicative[F].pure(db.get(customId.v))
 
-  override def remove(id: String): F[Unit] = {
-    db -= id
-    Monad[F].unit
+  override def remove(customId: CustomId): F[Unit] = {
+    db -= customId.v
+    Applicative[F].unit
   }
+
+  override def isEmpty: F[Boolean] = Applicative[F].pure(db.isEmpty)
 }
 
 abstract class PendingCalculationAlgebra[F[_]] {
 
-  def put(derivativeSymbol: String): F[Unit]
+  def activate(): F[Unit]
 
-  def remove(derivativeSymbol: String): F[Unit]
+  def deactivate(): F[Unit]
 
-  def shouldCalculate(derivativeSymbol: String): F[Boolean]
+  def shouldRecalculate: F[Boolean]
 
 }
 
-class PendingCalculationInMemInterpreter[F[_]: Monad] extends PendingCalculationAlgebra[F] {
-  private var db: Set[String] = Set.empty
+class PendingCalculationInMemInterpreter[F[_]: Applicative] extends PendingCalculationAlgebra[F] {
+  private var db: Boolean = false
 
-  override def put(derivativeSymbol: String): F[Unit] = {
-    db += derivativeSymbol
-    Monad[F].unit
+  override def activate(): F[Unit] = {
+    db = true
+    Applicative[F].unit
   }
 
-  override def shouldCalculate(derivativeSymbol: String): F[Boolean] = Monad[F].pure(db(derivativeSymbol))
-
-  override def remove(derivativeSymbol: String): F[Unit] = {
-    db -= derivativeSymbol
-    Monad[F].unit
+  override def deactivate(): F[Unit] = {
+    db = false
+    Applicative[F].unit
   }
+
+  override def shouldRecalculate: F[Boolean] = Applicative[F].pure(db)
 }

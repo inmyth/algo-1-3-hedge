@@ -1,68 +1,37 @@
 package guardian
 
+import cats.data.EitherT
 import cats.implicits._
 import cats.{Id, Monad}
 import com.ingalys.imc.BuySell
-import com.ingalys.imc.order.Order
-import guardian.Entities.OrderAction.{CancelOrder, UpdateOrder}
+import guardian.Entities.OrderAction.{CancelOrder, InsertOrder, UpdateOrder}
+import guardian.Entities.{CustomId, OrderAction, Portfolio}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers.convertToAnyShouldWrapper
+import guardian.Fixtures.{lastId, _}
 
 import scala.collection.mutable.ListBuffer
 import scala.language.{higherKinds, postfixOps}
-import scala.math.BigDecimal.RoundingMode
 
 class AlgoTest extends AnyFlatSpec {
 
-  //  behavior of "accumulateActiveOrders"
-
-  //  it should "accumulate orders' quantities" in {
-  //    val x = for {
-  //      a <- Monad[Option].pure {
-  //        val x = new LiveOrdersInMemInterpreter[Option]
-  //        x.putOrder("aaa", Order("id1", 10L, 100, 50, Entities.BUY))
-  //        x.putOrder("aaa", Order("id2", 11L, 20, 50, Entities.BUY))
-  //        x
-  //      }
-  //      b <- Monad[Option].pure {
-  //        new Application[Option](a)
-  //      }
-  //      c <- b.accumulateLiveOrders("aaa")
-  //    } yield c
-  //    x shouldBe Some(120)
-  //  }
-
-  // if new order's direction is different then Cancel ALL Live Orders
-  // if live orders are empty or new quantity is bigger than accumulate live orders' quantity then Insert
-  // else / if 0 < new quantity < accumulated liver orders' quantity then CancelOrder or UpdateOrder
-
   val symbol = "ptt"
-
 
   behavior of "trimLiveOrders"
 
   def createApp[F[_]: Monad](symbol: String): Algo[F] = {
-      val a = new LiveOrdersInMemInterpreter[F]
-      val b = new UnderlyingPortfolioInterpreter[F]
-      val c = new PendingOrdersInMemInterpreter[F]
-      val d = new PendingCalculationInMemInterpreter[F]
-      new Algo[F](a, b, c, d, symbol)
-  }
-
-//  def createApp[F[_]: Monad](symbol: String, lives: List[Order]) = {
-//    val x = createApp[F](symbol)
-//    lives.foreach(x.liveOrdersRepo.putOrder(symbol, _))
-//
-//  }
-
-  def createOrder(id: String, nanos: Long, qty: Long, price: Double, buySell: Int): Order = {
-    val x = new Order()
-    x.setId(id)
-    x.setTimestampNanos(nanos) // assume we are the exchange who can assign timestamp
-    x.setQuantity(qty)
-    x.setPrice(price)
-    x.setBuySell(buySell)
-    x
+    new Algo(
+      liveOrdersRepo = new LiveOrdersInMemInterpreter[F],
+      portfolioRepo = new UnderlyingPortfolioInterpreter[F],
+      pendingOrdersRepo = new PendingOrdersInMemInterpreter[F],
+      pendingCalculationRepo = new PendingCalculationInMemInterpreter[F],
+      underlyingSymbol = symbol,
+      preProcess = EitherT.fromEither(Right(liveOrders.head)),
+      sendOrder = (_: OrderAction) => liveOrders.head,
+      logAlert = (s: String) => println(s),
+      logInfo = (s: String) => println(s),
+      logError = (s: String) => println(s)
+    )
   }
 
   it should "create 1 UpdateOrder if calQty between o2 and o3 in [o1, o2, o3]" in {
@@ -71,9 +40,9 @@ class AlgoTest extends AnyFlatSpec {
     val q2     = 30L
     val q3     = 10L
     val liveOrders = List(
-      createOrder("id1", 10L, q1, 50.0, BuySell.BUY),
-      createOrder("id2", 11L, q2, 50.0, BuySell.BUY),
-      createOrder("id3", 12L, q3, 50.0, BuySell.BUY)
+      createTestOrder(id1, 10L, q1, 50.0, BuySell.BUY, customId1),
+      createTestOrder(id2, 11L, q2, 50.0, BuySell.BUY, customId2),
+      createTestOrder(lastId, 12L, q3, 50.0, BuySell.BUY, customId3)
     )
     val x = for {
       a <- Monad[Id].pure(createApp[Id](symbol))
@@ -89,11 +58,10 @@ class AlgoTest extends AnyFlatSpec {
 
   it should "create 1 CancelOrder if calQty is equal to o1 + o2 in [o1, o2, o3] " in {
     val calQty = 130L
-    val lastId = "id3"
     val liveOrders = List(
-      createOrder("id1", 10L, 100L, 50.0, BuySell.BUY),
-      createOrder("id2", 11L, 30L, 50.0, BuySell.BUY),
-      createOrder(lastId, 12L, 10L, 50.0, BuySell.BUY)
+      createTestOrder(id1, 10L, 100L, 50.0, BuySell.BUY, customId1),
+      createTestOrder(id2, 11L, 30L, 50.0, BuySell.BUY, customId2),
+      createTestOrder(lastId, 12L, 10L, 50.0, BuySell.BUY, customId3)
     )
     val x = for {
       a <- Monad[Id].pure(createApp[Id](symbol))
@@ -103,18 +71,11 @@ class AlgoTest extends AnyFlatSpec {
     } yield c
     x.size shouldBe 1
     x.head.isInstanceOf[CancelOrder] shouldBe true
-    x.head.asInstanceOf[CancelOrder].id shouldBe lastId
+    x.head.asInstanceOf[CancelOrder].order.getId shouldBe lastId
   }
 
   it should "create two CancelOrder if calQty is equal to o1 in [o1, o2, o3]" in {
     val calQty = 100L
-    val lastId = "id3"
-    val id2    = "id2"
-    val liveOrders = List(
-      createOrder("id1", 10L, 100L, 50.0, BuySell.BUY),
-      createOrder(id2, 11L, 30L, 50.0, BuySell.BUY),
-      createOrder(lastId, 12L, 10L, 50.0, BuySell.BUY)
-    )
     val x = for {
       a <- Monad[Id].pure(createApp[Id](symbol))
       _ = liveOrders.foreach(a.liveOrdersRepo.putOrder(symbol, _))
@@ -123,18 +84,12 @@ class AlgoTest extends AnyFlatSpec {
     } yield c
     x.size shouldBe 2
     x.count(_.isInstanceOf[CancelOrder]) shouldBe 2
-    x.head.asInstanceOf[CancelOrder].id shouldBe lastId
-    x(1).asInstanceOf[CancelOrder].id shouldBe id2
+    x.head.asInstanceOf[CancelOrder].order.getId shouldBe lastId
+    x(1).asInstanceOf[CancelOrder].order.getId shouldBe id2
   }
 
   it should "create 2 CancelOrders and 1 UpdateOrder if calQty is between 0 and o1 in [o1, o2, o3] " in {
     val calQty = 60L
-    val id1    = "id1"
-    val liveOrders = List(
-      createOrder(id1, 10L, 100L, 50.0, BuySell.BUY),
-      createOrder("id2", 11L, 30L, 50.0, BuySell.BUY),
-      createOrder("id3", 12L, 10L, 50.0, BuySell.BUY)
-    )
     val x = for {
       a <- Monad[Id].pure(createApp[Id](symbol))
       _ = liveOrders.foreach(a.liveOrdersRepo.putOrder(symbol, _))
@@ -152,14 +107,7 @@ class AlgoTest extends AnyFlatSpec {
 
   it should "create 1 CancelOrders and 1 UpdateOrder if calQty is between o1 and o2 in [o1, o2, o3] " in {
     val calQty = 110L
-    val id2    = "id2"
-    val id3    = "id3"
     val q1     = 100L
-    val liveOrders = List(
-      createOrder("id1", 10L, 100L, 50.0, BuySell.BUY),
-      createOrder(id2, 11L, 30L, 50.0, BuySell.BUY),
-      createOrder(id3, 12L, 10L, 50.0, BuySell.BUY)
-    )
     val x = for {
       a <- Monad[Id].pure(createApp[Id](symbol))
       _ = liveOrders.foreach(a.liveOrdersRepo.putOrder(symbol, _))
@@ -175,13 +123,6 @@ class AlgoTest extends AnyFlatSpec {
 
   it should "cancel all orders when calQty = 0 " in {
     val calQty = 0L
-    val id2    = "id2"
-    val id3    = "id3"
-    val liveOrders = List(
-      createOrder("id1", 10L, 100L, 50.0, BuySell.BUY),
-      createOrder(id2, 11L, 30L, 50.0, BuySell.BUY),
-      createOrder(id3, 12L, 10L, 50.0, BuySell.BUY)
-    )
     val x = for {
       a <- Monad[Id].pure(createApp[Id](symbol))
       _ = liveOrders.foreach(a.liveOrdersRepo.putOrder(symbol, _))
@@ -192,46 +133,221 @@ class AlgoTest extends AnyFlatSpec {
     x.head.isInstanceOf[CancelOrder] shouldBe true
   }
 
-  behavior of "getTotalQtyLiveOrders"
+  behavior of "createOrderActions"
 
-  it should "return positive sum of all BUY orders quantity all orders" in {
-    val q1 = 100L
-    val q2 = 30L
-    val q3 = 10L
-    val liveOrders = List(
-      createOrder("id1", 10L, q1, 50.0, BuySell.BUY),
-      createOrder("id2", 11L, q2, 50.0, BuySell.BUY),
-      createOrder("id3", 12L, q3, 50.0, BuySell.BUY)
-    )
-    val a = createApp[Id](symbol)
-    val b = a.calcTotalQty(liveOrders)
-    b shouldBe (q1 + q2 + q3)
+  it should "return InsertOrder when buying and live orders are empty" in {
+    val x = for {
+      a <- Monad[Id].pure(createApp[Id](symbol))
+      c <- a.createOrderActions(rawOrderBuy)
+    } yield c
+    x.size shouldBe 1
+    x.head.isInstanceOf[InsertOrder] shouldBe true
   }
 
-  it should "return negative sum of all SELL orders quantity all orders" in {
-    val q1 = 100L
-    val q2 = 30L
-    val q3 = 10L
-    val liveOrders = List(
-      createOrder("id1", 10L, q1, 50.0, BuySell.SELL),
-      createOrder("id2", 11L, q2, 50.0, BuySell.SELL),
-      createOrder("id3", 12L, q3, 50.0, BuySell.SELL)
-    )
-    val a = createApp[Id](symbol)
-    val b = a.calcTotalQty(liveOrders)
-    b shouldBe (q1 + q2 + q3) * -1
+  it should "return InsertOrder when selling and live orders are empty and portfolio has enough position" in {
+    val x = for {
+      a <- Monad[Id].pure(createApp[Id](symbol))
+      _ <- a.portfolioRepo.put(symbol, Portfolio(symbol, Long.MaxValue))
+      c <- a.createOrderActions(rawOrderSell)
+    } yield c
+    x.size shouldBe 1
+    x.head.isInstanceOf[InsertOrder] shouldBe true
   }
 
-  it should "return 0 if no live orders" in {
-    val liveOrders = List()
-    val a = createApp[Id](symbol)
-    val b = a.calcTotalQty(liveOrders)
-    b shouldBe 0
+  it should "return only CancelOrders when selling if its direction and live orders' direction don't match and portfolio is empty" in {
+    val liveOrders = List(
+      createTestOrder(id1, 10L, 100L, 50.0, BuySell.BUY, customId1),
+      createTestOrder(id2, 11L, 30L, 50.0, BuySell.BUY, customId2),
+      createTestOrder(lastId, 12L, 10L, 50.0, BuySell.BUY, customId3)
+    )
+    val x = for {
+      a <- Monad[Id].pure(createApp[Id](symbol))
+      _ = liveOrders.foreach(a.liveOrdersRepo.putOrder(symbol, _))
+      c <- a.createOrderActions(rawOrderSell)
+    } yield c
+    x.size shouldBe liveOrders.size
+  }
+  /*
+  sell, qty larger than live orders, portfolio enough
+  sell, qty larger than live orders, portfolio not enough
+  sell, qty smaller than live orders, portfolio enough
+  sell, qty smaller than live orders, portfolio not enough
+   */
+  it should "return one InsertOrder when selling with not enough position, new qty being current position = portfolio - live orders qty" in {
+    val qty1     = 100L
+    val qty2     = 30L
+    val qty3     = 10L
+    val position = 200L
+    val liveOrders = List(
+      createTestOrder(id1, 10L, qty1, 50.0, BuySell.SELL, customId1),
+      createTestOrder(id2, 11L, qty2, 50.0, BuySell.SELL, customId2),
+      createTestOrder(lastId, 12L, qty3, 50.0, BuySell.SELL, customId3)
+    )
+    val portfolio = Portfolio(symbol, position)
+    val x = for {
+      a <- Monad[Id].pure(createApp[Id](symbol))
+      _ = liveOrders.foreach(a.liveOrdersRepo.putOrder(symbol, _))
+      _ <- a.portfolioRepo.put(symbol, portfolio)
+      c <- a.createOrderActions(rawOrderSell)
+    } yield c
+    x.size shouldBe 1
+    x.head.asInstanceOf[InsertOrder].order.getQuantityL shouldBe position - (qty1 + qty2 + qty3)
+  }
+
+  it should "return one InsertOrder when buying with not enough position (buy doesn't depend on portfolio), new qty = order.qty - live orders qty" in {
+    val qty1     = 100L
+    val qty2     = 30L
+    val qty3     = 10L
+    val position = 200L
+    val liveOrders = List(
+      createTestOrder(id1, 10L, qty1, 50.0, BuySell.BUY, customId1),
+      createTestOrder(id2, 11L, qty2, 50.0, BuySell.BUY, customId2),
+      createTestOrder(lastId, 12L, qty3, 50.0, BuySell.BUY, customId3)
+    )
+    val portfolio = Portfolio(symbol, position)
+    val x = for {
+      a <- Monad[Id].pure(createApp[Id](symbol))
+      _ = liveOrders.foreach(a.liveOrdersRepo.putOrder(symbol, _))
+      _ <- a.portfolioRepo.put(symbol, portfolio)
+      c <- a.createOrderActions(rawOrderBuy)
+    } yield c
+    x.size shouldBe 1
+    x.head.asInstanceOf[InsertOrder].order.getQuantityL shouldBe rawOrderBuy.getQuantityL - (qty1 + qty2 + qty3)
+  }
+
+  it should "return one InsertOrder when selling with enough position, new qty = order.qty - live orders qty" in {
+    val qty1     = 100L
+    val qty2     = 30L
+    val qty3     = 10L
+    val position = 1000000L
+    val liveOrders = List(
+      createTestOrder(id1, 10L, qty1, 50.0, BuySell.SELL, customId1),
+      createTestOrder(id2, 11L, qty2, 50.0, BuySell.SELL, customId2),
+      createTestOrder(lastId, 12L, qty3, 50.0, BuySell.SELL, customId3)
+    )
+    val portfolio = Portfolio(symbol, position)
+    val x = for {
+      a <- Monad[Id].pure(createApp[Id](symbol))
+      _ = liveOrders.foreach(a.liveOrdersRepo.putOrder(symbol, _))
+      _ <- a.portfolioRepo.put(symbol, portfolio)
+      c <- a.createOrderActions(rawOrderSell)
+    } yield c
+    x.size shouldBe 1
+    x.head.asInstanceOf[InsertOrder].order.getQuantityL shouldBe rawOrderSell.getQuantityL - (qty1 + qty2 + qty3)
+  }
+
+  it should "trim live orders when sell or buy order qty is smaller than live orders qty" in {
+    val liveOrders = List(
+      createTestOrder(id1, 10L, 100L, 50.0, BuySell.SELL, customId1),
+      createTestOrder(id2, 11L, 30L, 50.0, BuySell.SELL, customId2),
+      createTestOrder(lastId, 12L, 10L, 50.0, BuySell.SELL, customId3)
+    )
+    val portfolio = Portfolio(symbol, 200L)
+    val x = for {
+      a <- Monad[Id].pure(createApp[Id](symbol))
+      _ = liveOrders.foreach(a.liveOrdersRepo.putOrder(symbol, _))
+      _ <- a.portfolioRepo.put(symbol, portfolio)
+      c <- a.createOrderActions(createTestOrder("xx", 10L, 110, 50.0, BuySell.SELL, CustomId.generate))
+    } yield c
+    x.size shouldBe 2
+    x.head.isInstanceOf[CancelOrder] shouldBe true
+    x.last.isInstanceOf[UpdateOrder] shouldBe true
+    x.last.asInstanceOf[UpdateOrder].order.getQuantityL shouldBe 10L
+  }
+
+  it should "cancel all live orders when sell or buy order qty is 0" in {
+    val liveOrders = List(
+      createTestOrder(id1, 10L, 100L, 50.0, BuySell.SELL, customId1),
+      createTestOrder(id2, 11L, 30L, 50.0, BuySell.SELL, customId2),
+      createTestOrder(lastId, 12L, 10L, 50.0, BuySell.SELL, customId3)
+    )
+    val portfolio = Portfolio(symbol, 200L)
+    val x = for {
+      a <- Monad[Id].pure(createApp[Id](symbol))
+      _ = liveOrders.foreach(a.liveOrdersRepo.putOrder(symbol, _))
+      _ <- a.portfolioRepo.put(symbol, portfolio)
+      c <- a.createOrderActions(createTestOrder("xx", 10L, 0, 50.0, BuySell.SELL, CustomId.generate))
+    } yield c
+    x.count(_.isInstanceOf[CancelOrder]) shouldBe liveOrders.size
+  }
+
+  behavior of "checkPendingOrderAction"
+
+  it should "return Left when it pending orders exist " in {
+    val x = for {
+      a <- Monad[Id].pure(createApp[Id](symbol))
+      _ <- a.pendingOrdersRepo.put(InsertOrder(rawOrderBuy))
+      c <- a.checkAndUpdatePendingOrderAndCalculation()
+    } yield c
+    x.isLeft shouldBe true
+  }
+
+  it should "return Right when it pending orders empty " in {
+    val x = for {
+      a <- Monad[Id].pure(createApp[Id](symbol))
+      c <- a.checkAndUpdatePendingOrderAndCalculation()
+    } yield c
+    x.isRight shouldBe true
+  }
+
+  behavior of "integrated test: handleOnSignal"
+
+  val dw1 = "PTT@ABC"
+
+  it should "return Left if pendingOrders is not empty" in {
+    val x = for {
+      a <- Monad[Id].pure(createApp[Id](symbol))
+      _ <- a.pendingOrdersRepo.put(InsertOrder(rawOrderBuy))
+      c <- a.handleOnSignal()
+    } yield c
+    x.isLeft shouldBe true
+  }
+
+  it should "return Right if pendingComputation is empty" in {
+    val x = for {
+      a <- Monad[Id].pure(createApp[Id](symbol))
+      b <- a.handleOnSignal()
+    } yield b
+    x.isRight shouldBe true
+  }
+
+  behavior of "integrated test: handleOnOrderAck"
+
+  it should "return Right if pendingOrder is available in the repo" in {
+    val x = for {
+      a <- Monad[Id].pure(createApp[Id](symbol))
+      _ <- a.pendingOrdersRepo.put(InsertOrder(rawOrderBuy))
+      c = a.handleOnOrderAck(CustomId.fromOrder(rawOrderBuy))
+    } yield c
+    x.value.isRight shouldBe true
+  }
+
+  it should "return Left if pendingOrder is not available in the repo" in {
+    val x = for {
+      a <- Monad[Id].pure(createApp[Id](symbol))
+      c = a.handleOnOrderAck(CustomId.fromOrder(rawOrderBuy))
+    } yield c
+    x.value.isLeft shouldBe true
+  }
+
+//  behavior of "integrated test: handleOnOrderNak"
+
+  behavior of "getPriceAfterTicks"
+
+  it should "return 32 when price is 30.75 ticked down 5 steps" in {
+    Algo.getPriceAfterTicks(false, BigDecimal(32), 5) shouldBe 30.75
+  }
+
+  it should "return 24.70 when price is 25.50 ticked down 5 steps" in {
+    Algo.getPriceAfterTicks(false, BigDecimal(25.50), 5) shouldBe 24.70
+  }
+
+  it should "return 101.5 when price is 99.5 ticked up 5 steps" in {
+    Algo.getPriceAfterTicks(true, BigDecimal(99.50), 5) shouldBe 101.5
+  }
+
+  it should "return 98.25 when price is 99.5 ticked down 5 steps" in {
+    Algo.getPriceAfterTicks(false, BigDecimal(99.50), 5) shouldBe 98.25
   }
 
 }
-
-
-
-
-

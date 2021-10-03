@@ -1,4 +1,9 @@
 # Algo-1-3 Hedge V2
 
 
-Read me here
+## Missing parameters
+
+### Lot size 
+Lot size = ulInstrument.getLotSizeD
+
+### Call or Put market
