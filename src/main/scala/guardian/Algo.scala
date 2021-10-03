@@ -23,6 +23,7 @@ class Algo[F[_]: Applicative: Monad](
     val pendingOrdersRepo: PendingOrdersAlgebra[F],
     val pendingCalculationRepo: PendingCalculationAlgebra[F],
     underlyingSymbol: String,
+    lotSize: Int,
     preProcess: EitherT[F, Error, Order],
     sendOrder: (OrderAction) => Order,
     logAlert: String => Unit,
@@ -179,69 +180,40 @@ class Algo[F[_]: Applicative: Monad](
       )
       _ <- handleOnOrderAck(customId)
     } yield ()
-
-  // second init on Load signal
-  def handleOnLoad(ulId: String, qty: Long) =
-    for {
-      _ <- EitherT.right[Error](portfolioRepo.put(ulId, Portfolio(ulId, qty)))
-    } yield ()
-
 }
 
 object Algo {
-
-  def xxx[F[_]: Monad: Applicative](bbb: String => Unit) = Monad[F].pure(bbb("adsadasdsads"))
-
-  def xxx2(bbb: String => Unit) = xxx[Id](bbb)
-
-  def xxx10[F[_]: Monad: Applicative](bbb: String) = Monad[F].pure(bbb)
-
-  def xxx3(v: InstrumentDescriptor) = xxx10[Id](v.getUniqueId)
-
-  def build(
-      underlyingSymbol: String,
-      sendOrder: (OrderAction) => Order,
-      logAlert: String => Unit,
-      logInfo: String => Unit,
-      logError: String => Unit
-  ): Algo[Id] =
-    Algo(
-      liveOrdersRepo = new LiveOrdersInMemInterpreter[Id](),
-      portfolioRepo = new UnderlyingPortfolioInterpreter[Id](),
-      pendingOrdersRepo = new PendingOrdersInMemInterpreter[Id](),
-      pendingCalculationRepo = new PendingCalculationInMemInterpreter[Id](),
-      underlyingSymbol = underlyingSymbol,
-      preProcess = EitherT.leftT(Error.MarketError("aaaa")),
-      sendOrder = sendOrder,
-      logAlert = logAlert,
-      logInfo = logInfo,
-      logError = logError
-    )
-
   def apply[F[_]: Applicative: Monad](
-      liveOrdersRepo: LiveOrdersRepoAlgebra[F],
-      portfolioRepo: UnderlyingPortfolioAlgebra[F],
-      pendingOrdersRepo: PendingOrdersAlgebra[F],
-      pendingCalculationRepo: PendingCalculationAlgebra[F],
       underlyingSymbol: String,
+      lotSize: Int,
+      portfolioQty: Long,
       preProcess: EitherT[F, Error, Order],
       sendOrder: (OrderAction) => Order,
       logAlert: String => Unit,
       logInfo: String => Unit,
       logError: String => Unit
-  ): Algo[F] =
-    new Algo(
-      liveOrdersRepo,
-      portfolioRepo,
-      pendingOrdersRepo,
-      pendingCalculationRepo,
-      underlyingSymbol,
-      preProcess,
-      sendOrder,
-      logAlert,
-      logInfo,
-      logError
-    )
+  ): F[Algo[F]] = {
+    val liveOrdersRepo         = new LiveOrdersInMemInterpreter[F]
+    val portfolioRepo          = new UnderlyingPortfolioInterpreter[F]
+    val pendingOrdersRepo      = new PendingOrdersInMemInterpreter[F]
+    val pendingCalculationRepo = new PendingCalculationInMemInterpreter[F]
+    for {
+      _ <- portfolioRepo.put(underlyingSymbol, Portfolio(underlyingSymbol, portfolioQty))
+      b = new Algo(
+        liveOrdersRepo,
+        portfolioRepo,
+        pendingOrdersRepo,
+        pendingCalculationRepo,
+        underlyingSymbol,
+        lotSize,
+        preProcess,
+        sendOrder,
+        logAlert,
+        logInfo,
+        logError
+      )
+    } yield b
+  }
 
   def createOrder(qty: Long, prc: Double, buysell: Int, customId: CustomId): Order = {
     val o = new Order()
@@ -281,64 +253,4 @@ object Algo {
     val x = c.filter(p => refPrice >= p._1).last
     if (refPrice == x._1 && !isUp) x._2 else x._3
   }
-
-  def preProcess[F[_]: Monad: Applicative](
-      getDwList: (IDictionaryProvider, String, String) => List[InstrumentDescriptor],
-      getDwProjectedPrice: InstrumentDescriptor => Option[Double],
-      getOwnBestAskPrice: InstrumentDescriptor => Option[Double],
-      calcUlQtyPreResidual: (Double, Double, Double, Double, String, String) => Long,
-      getPutOrCall: InstrumentDescriptor => Option[PutCall],
-      getUlProjectedPrice: (InstrumentDescriptor, Direction) => Either[Error, BigDecimal],
-      getDelta: String => Option[Double],
-      getPointValue: InstrumentDescriptor => Double,
-      getAbsoluteResidual: (Double, String) => Option[BigDecimal],
-      ulInstrument: InstrumentDescriptor,
-      dictionaryService: IDictionaryProvider,
-      hedgeInstrument: InstrumentDescriptor,
-      context: String = "DEFAULT",
-      exchangeName: String = "SET"
-  ): EitherT[F, Error, Order] =
-    for {
-      ulId                 <- EitherT.rightT[F, Error](ulInstrument.getUniqueId)
-      dwList               <- EitherT.rightT[F, Error](getDwList(dictionaryService, ulId, exchangeName))
-      dwProjectedPriceList <- EitherT.rightT[F, Error](dwList.map(getDwProjectedPrice))
-      bestBidPriceList     <- EitherT.rightT[F, Error](dwList.map(getDwProjectedPrice))
-      bestAskPriceList     <- EitherT.rightT[F, Error](dwList.map(getOwnBestAskPrice))
-      deltaList            <- EitherT.rightT[F, Error](dwList.map(p => getDelta(p.getUniqueId)))
-      dwPutCallList        <- EitherT.rightT[F, Error](dwList.map(getPutOrCall))
-      pointValue           <- EitherT.rightT[F, Error](getPointValue(hedgeInstrument))
-      absoluteResidual     <- EitherT.rightT[F, Error](getAbsoluteResidual(pointValue, ulId))
-      signedDeltaList <- EitherT.rightT[F, Error](
-        (deltaList, dwPutCallList).zipped.toList
-          .map {
-            case (Some(delta), Some(CALL)) => 1 * delta
-            case (Some(delta), Some(PUT))  => -1 * delta
-            case _                         => 0
-          }
-      )
-      partialResidual <- EitherT.rightT[F, Error](
-        (bestBidPriceList, bestAskPriceList, dwProjectedPriceList).zipped.toList
-          .zip(signedDeltaList)
-          .map {
-            case ((Some(a), Some(b), Some(c)), d) => (a, b, c, d)
-            case ((_, _, _), d)                   => (0.0d, 0.0d, 0.0d, d)
-          }
-          .zip(dwList)
-          .map {
-            case ((a, b, c, d), e) => (a, b, c, d, e.getUniqueId)
-          }
-          .map(p => calcUlQtyPreResidual(p._1, p._2, p._3, p._4, p._5, context))
-          .sum
-      )
-      totalResidual = partialResidual + absoluteResidual.getOrElse(BigDecimal("0")).toLong
-      direction     = if (totalResidual < 0) Direction.SELL else Direction.BUY
-      hzDirection   = if (direction == Direction.SELL) BuySell.SELL else BuySell.BUY
-      ulProjectedPrice <- EitherT.fromEither[F](getUlProjectedPrice(ulInstrument, direction))
-      absTotalResidual = Math.abs(totalResidual)
-      order            = Algo.createOrder(absTotalResidual, ulProjectedPrice.toDouble, hzDirection, CustomId.generate)
-      _ <- EitherT.rightT[F, Error](
-        Either.cond(order.getQuantityL > 0, (), Error.StateError("Pre-process order qty cannot be negative"))
-      )
-    } yield order
-
 }
