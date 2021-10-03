@@ -61,6 +61,15 @@ class Algo[F[_]: Applicative: Monad](
       }
     } yield d
 
+  def roundDownQty(action: OrderAction, lotSize: Int): OrderAction =
+    action match {
+      case InsertOrder(order) =>
+        val rounded = order.getQuantityL / lotSize * lotSize
+        InsertOrder(createOrder(order, rounded))
+      case a @ UpdateOrder(_) => a
+      case a @ CancelOrder(_) => a
+    }
+
   def calcTotalQty(orders: List[Order]): Long = orders.foldLeft(0L)((a: Long, b: Order) => a + b.getQuantityL)
 
   val createCancelOrder: Order => OrderAction = o => CancelOrder(o)
@@ -120,7 +129,8 @@ class Algo[F[_]: Applicative: Monad](
     (for {
       b <- preProcess
       c <- EitherT.right[Error](createOrderActions(b))
-    } yield c).value.map {
+      d <- EitherT.right[Error](c.map(p => roundDownQty(p, lotSize).pure[F]).sequence)
+    } yield d).value.map {
       case Right(v) => v
       case Left(e) =>
         logAlert(e.msg)
@@ -152,7 +162,7 @@ class Algo[F[_]: Applicative: Monad](
     (for {
       _ <- checkAndUpdatePendingOrderAndCalculation()
       a <- EitherT.right[Error](process())
-      _ <- EitherT.right[Error](a.map(p => Monad[F].pure(sendOrder(p))).sequence)
+      _ <- EitherT.right[Error](a.map(p => sendOrder(p).pure[F]).sequence)
       _ <- EitherT.right[Error](a.map(pendingOrdersRepo.put).sequence)
     } yield ()).value.map {
       case Right(_) => Right(())
@@ -223,6 +233,14 @@ object Algo {
     o.setCustomField(CustomId.field, customId.v)
     o
   }
+
+  def createOrder(order: Order, newQty: Long): Order =
+    createOrder(
+      newQty,
+      order.getPrice,
+      order.getBuySell,
+      CustomId(order.getCustomField(CustomId.field).asInstanceOf[String])
+    )
 
   @tailrec
   def getPriceAfterTicks(isPlus: Boolean, price: BigDecimal, ticks: Int = 5): BigDecimal = {

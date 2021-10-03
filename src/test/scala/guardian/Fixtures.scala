@@ -9,6 +9,8 @@ object Fixtures {
   val id2            = "id2"
   val lastId         = "id3"
   val symbol: String = "PTT"
+  val lotSize        = 100
+  val ulPrice        = 50.0
 
   val customId1 = CustomId.generate
   val customId2 = CustomId.generate
