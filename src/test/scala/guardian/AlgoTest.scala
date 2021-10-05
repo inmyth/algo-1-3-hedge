@@ -181,6 +181,15 @@ class AlgoTest extends AnyWordSpec with Matchers {
           }
         }
       }
+      "order does not have rounded quantity" should {
+        "get the quantity rounded down to lot size" in {
+          val process = baseProcess(List.empty, portfolioQty)
+          val qty     = 6323
+          val order   = createTestOrder("someid", 10L, qty, ulPrice, BuySell.SELL, CustomId.generate)
+          val x       = process(order)
+          x.head.asInstanceOf[InsertOrder].order.getQuantityL % lotSize shouldBe 0
+        }
+      }
     }
   }
 
