@@ -96,6 +96,7 @@ class Algo[F[_]: Applicative: Monad](
   ): List[OrderAction] = {
     val head :: rest = liveOrders
     val liveQty      = rest.foldLeft(0L)((x: Long, y: Order) => x + y.getQuantityL)
+
     if (liveQty < calculatedQuantity) {
       val remainder = calculatedQuantity - liveQty
       val o         = cloneModifyOrder(head, remainder, head.getPrice, head.getBuySell)
