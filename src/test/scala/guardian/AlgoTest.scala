@@ -18,7 +18,7 @@ import scala.language.{higherKinds, postfixOps}
 
 class AlgoTest extends AnyWordSpec with Matchers {
 
-  def createApp[F[_]: Monad](preProcess: EitherT[F, Error, Order]): Algo[F] = {
+  def createApp[F[_]: Monad](): Algo[F] = {
     new Algo(
       liveOrdersRepo = new LiveOrdersInMemInterpreter[F],
       portfolioRepo = new UnderlyingPortfolioInterpreter[F],
@@ -26,7 +26,6 @@ class AlgoTest extends AnyWordSpec with Matchers {
       pendingCalculationRepo = new PendingCalculationInMemInterpreter[F],
       underlyingSymbol = symbol,
       lotSize = lotSize,
-      preProcess = preProcess,
       sendOrder = (_: OrderAction) => liveBuyOrders.head,
       logAlert = (s: String) => println(s),
       logInfo = (s: String) => println(s),
@@ -37,10 +36,10 @@ class AlgoTest extends AnyWordSpec with Matchers {
   def baseProcess(liveOrders: List[Order], portfolioQty: Long): Order => Id[List[OrderAction]] =
     (order: Order) =>
       for {
-        a <- createApp[Id](EitherT.fromEither(order.asRight[Error])).pure[Id]
+        a <- createApp[Id]().pure[Id]
         _ <- a.portfolioRepo.put(symbol, Portfolio(symbol, portfolioQty))
         _ = liveOrders.foreach(a.liveOrdersRepo.putOrder(symbol, _))
-        c <- a.process()
+        c <- a.process(EitherT.fromEither(order.asRight[Error]))
       } yield c
 
   "process" when {
@@ -204,9 +203,9 @@ class AlgoTest extends AnyWordSpec with Matchers {
     "return Left" when {
       "pending orders exist" in {
         val x = for {
-          a <- createApp[Id](EitherT.fromEither(rawOrderBuy.asRight[Error])).pure[Id]
+          a <- createApp[Id]().pure[Id]
           _ <- a.pendingOrdersRepo.put(InsertOrder(rawOrderBuy))
-          c <- a.handleOnSignal()
+          c <- a.handleOnSignal(EitherT.fromEither(rawOrderBuy.asRight[Error]))
         } yield c
         x shouldBe Left(Error.PendingError)
       }
@@ -214,8 +213,8 @@ class AlgoTest extends AnyWordSpec with Matchers {
     "return Right" when {
       "pending orders are empty" in {
         val x = for {
-          a <- createApp[Id](EitherT.fromEither(rawOrderBuy.asRight[Error])).pure[Id]
-          c <- a.handleOnSignal()
+          a <- createApp[Id]().pure[Id]
+          c <- a.handleOnSignal(EitherT.fromEither(rawOrderBuy.asRight[Error]))
         } yield c
         x shouldBe Right(())
       }
@@ -226,8 +225,8 @@ class AlgoTest extends AnyWordSpec with Matchers {
     "return Left" when {
       "order is not available in the pending repo" in {
         val x = for {
-          a <- createApp[Id](EitherT.fromEither(rawOrderBuy.asRight[Error])).pure[Id]
-          c = a.handleOnOrderAck(CustomId.fromOrder(rawOrderBuy))
+          a <- createApp[Id]().pure[Id]
+          c = a.handleOnOrderAck(CustomId.fromOrder(rawOrderBuy), EitherT.fromEither(rawOrderBuy.asRight[Error]))
         } yield c
         x.value shouldBe Left(
           Error.UnknownError(s"Pending order not found, custom id:${rawOrderBuy.getCustomField(CustomId.field)}")
@@ -237,9 +236,9 @@ class AlgoTest extends AnyWordSpec with Matchers {
     "return Right" when {
       "order exists in the pending repo" in {
         val x = for {
-          a <- createApp[Id](EitherT.fromEither(rawOrderBuy.asRight[Error])).pure[Id]
+          a <- createApp[Id]().pure[Id]
           _ <- a.pendingOrdersRepo.put(InsertOrder(rawOrderBuy))
-          c = a.handleOnOrderAck(CustomId.fromOrder(rawOrderBuy))
+          c = a.handleOnOrderAck(CustomId.fromOrder(rawOrderBuy), EitherT.fromEither(rawOrderBuy.asRight[Error]))
         } yield c
         x.value shouldBe Right(())
       }

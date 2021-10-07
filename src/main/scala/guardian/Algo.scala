@@ -24,7 +24,6 @@ class Algo[F[_]: Applicative: Monad](
     val pendingCalculationRepo: PendingCalculationAlgebra[F],
     underlyingSymbol: String,
     lotSize: Int,
-    preProcess: EitherT[F, Error, Order],
     sendOrder: (OrderAction) => Order,
     logAlert: String => Unit,
     logInfo: String => Unit,
@@ -133,7 +132,7 @@ class Algo[F[_]: Applicative: Monad](
       case CancelOrder(order) => liveOrdersRepo.removeOrder(underlyingSymbol, order.getId)
     }
 
-  def process(): F[List[OrderAction]] =
+  def process(preProcess: EitherT[F, Error, Order]): F[List[OrderAction]] =
     (for {
       b <- preProcess
       c <- EitherT.right[Error](createOrderActions(b))
@@ -167,10 +166,10 @@ class Algo[F[_]: Applicative: Monad](
   // CALLED WHEN SIGNAL
 
   // called everytime ul price changes
-  def handleOnSignal(): F[Either[Error, Unit]] =
+  def handleOnSignal(preProcess: EitherT[F, Error, Order]): F[Either[Error, Unit]] =
     (for {
       _ <- checkAndUpdatePendingOrderAndCalculation()
-      a <- EitherT.right[Error](process())
+      a <- EitherT.right[Error](process(preProcess))
       _ <- EitherT.right[Error](a.map(p => sendOrder(p).pure[F]).sequence)
       _ <- EitherT.right[Error](a.map(pendingOrdersRepo.put).sequence)
     } yield ()).value.map {
@@ -180,24 +179,28 @@ class Algo[F[_]: Applicative: Monad](
         Left(e)
     }
 
-  def handleOnOrderAck(customId: CustomId): EitherT[F, Error, Unit] =
+  def handleOnOrderAck(customId: CustomId, preProcess: EitherT[F, Error, Order]): EitherT[F, Error, Unit] =
     for {
       a <- getPendingOrderAction(customId)
       _ <- EitherT.right[Error](updateLiveOrders(a))
       _ <- EitherT.right[Error](pendingOrdersRepo.remove(customId))
       d <- EitherT.right[Error](pendingCalculationRepo.shouldRecalculate)
-      _ <- if (d) EitherT.liftF(handleOnSignal()) else EitherT.rightT[F, Error](())
+      _ <- if (d) EitherT.liftF(handleOnSignal(preProcess)) else EitherT.rightT[F, Error](())
       _ <- EitherT.right[Error](pendingCalculationRepo.deactivate())
     } yield ()
 
-  def handleOnOrderNak(customId: CustomId, errorMsg: String): EitherT[F, Error, Unit] =
+  def handleOnOrderNak(
+      customId: CustomId,
+      errorMsg: String,
+      preProcess: EitherT[F, Error, Order]
+  ): EitherT[F, Error, Unit] =
     for {
       _ <- EitherT.right[Error](
         Monad[F].pure(
           logAlert(errorMsg)
         )
       )
-      _ <- handleOnOrderAck(customId)
+      _ <- handleOnOrderAck(customId, preProcess)
     } yield ()
 }
 
@@ -206,7 +209,6 @@ object Algo {
       underlyingSymbol: String,
       lotSize: Int,
       portfolioQty: Long,
-      preProcess: EitherT[F, Error, Order],
       sendOrder: (OrderAction) => Order,
       logAlert: String => Unit,
       logInfo: String => Unit,
@@ -225,7 +227,6 @@ object Algo {
         pendingCalculationRepo,
         underlyingSymbol,
         lotSize,
-        preProcess,
         sendOrder,
         logAlert,
         logInfo,
