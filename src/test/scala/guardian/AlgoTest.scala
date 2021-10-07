@@ -181,6 +181,13 @@ class AlgoTest extends AnyWordSpec with Matchers {
           }
         }
       }
+      "live orders don't exist when order with zero quantity arrives" should {
+        "not send any order" in {
+          val process = baseProcess(List.empty, 0L)
+          val x       = process(Algo.createOrder(0, ulPrice, BuySell.BUY, CustomId.generate))
+          x.size shouldBe 0
+        }
+      }
       "order does not have rounded quantity" should {
         "get the quantity rounded down to lot size" in {
           val process = baseProcess(List.empty, portfolioQty)

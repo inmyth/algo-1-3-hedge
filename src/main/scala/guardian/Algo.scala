@@ -70,6 +70,13 @@ class Algo[F[_]: Applicative: Monad](
       case a @ CancelOrder(_) => a
     }
 
+  def removeZeroQty(action: OrderAction): Boolean =
+    action match {
+      case InsertOrder(order) => order.getQuantityL != 0L
+      case UpdateOrder(order) => order.getQuantityL != 0L
+      case CancelOrder(order) => order.getQuantityL != 0L
+    }
+
   def calcTotalQty(orders: List[Order]): Long = orders.foldLeft(0L)((a: Long, b: Order) => a + b.getQuantityL)
 
   val createCancelOrder: Order => OrderAction = o => CancelOrder(o)
@@ -131,7 +138,8 @@ class Algo[F[_]: Applicative: Monad](
       b <- preProcess
       c <- EitherT.right[Error](createOrderActions(b))
       d <- EitherT.right[Error](c.map(p => roundDownQty(p, lotSize).pure[F]).sequence)
-    } yield d).value.map {
+      e <- EitherT.rightT[F, Error](d.filter(removeZeroQty))
+    } yield e).value.map {
       case Right(v) => v
       case Left(e) =>
         logAlert(e.msg)
