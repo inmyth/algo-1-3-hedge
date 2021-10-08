@@ -226,7 +226,11 @@ class AlgoTest extends AnyWordSpec with Matchers {
       "order is not available in the pending repo" in {
         val x = for {
           a <- createApp[Id]().pure[Id]
-          c = a.handleOnOrderAck(CustomId.fromOrder(rawOrderBuy), EitherT.fromEither(rawOrderBuy.asRight[Error]))
+          c = a.handleOnOrderAck(
+            rawOrderBuy,
+            CustomId.fromOrder(rawOrderBuy),
+            EitherT.fromEither(rawOrderBuy.asRight[Error])
+          )
         } yield c
         x.value shouldBe Left(
           Error.UnknownError(s"Pending order not found, custom id:${rawOrderBuy.getCustomField(CustomId.field)}")
@@ -238,7 +242,11 @@ class AlgoTest extends AnyWordSpec with Matchers {
         val x = for {
           a <- createApp[Id]().pure[Id]
           _ <- a.pendingOrdersRepo.put(InsertOrder(rawOrderBuy))
-          c = a.handleOnOrderAck(CustomId.fromOrder(rawOrderBuy), EitherT.fromEither(rawOrderBuy.asRight[Error]))
+          c = a.handleOnOrderAck(
+            rawOrderBuy,
+            CustomId.fromOrder(rawOrderBuy),
+            EitherT.fromEither(rawOrderBuy.asRight[Error])
+          )
         } yield c
         x.value shouldBe Right(())
       }

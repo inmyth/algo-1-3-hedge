@@ -4,6 +4,7 @@ import cats.data.EitherT
 import cats.implicits._
 import cats.{Applicative, Id, Monad}
 import com.ingalys.imc.BuySell
+import com.ingalys.imc.dict.Element
 import com.ingalys.imc.order.Order
 import guardian.Algo._
 import guardian.Entities.OrderAction.{CancelOrder, InsertOrder, UpdateOrder}
@@ -179,10 +180,22 @@ class Algo[F[_]: Applicative: Monad](
         Left(e)
     }
 
-  def handleOnOrderAck(customId: CustomId, preProcess: EitherT[F, Error, Order]): EitherT[F, Error, Unit] =
+  def replaceOrderActionContent(action: OrderAction, hzOrder: Order): OrderAction =
+    action match {
+      case InsertOrder(_) => InsertOrder(hzOrder)
+      case UpdateOrder(_) => UpdateOrder(hzOrder)
+      case CancelOrder(_) => CancelOrder(hzOrder)
+    }
+
+  def handleOnOrderAck(
+      hzOrder: Order,
+      customId: CustomId,
+      preProcess: EitherT[F, Error, Order]
+  ): EitherT[F, Error, Unit] =
     for {
       a <- getPendingOrderAction(customId)
-      _ <- EitherT.right[Error](updateLiveOrders(a))
+      b <- EitherT.rightT[F, Error](replaceOrderActionContent(a, hzOrder))
+      _ <- EitherT.right[Error](updateLiveOrders(b))
       _ <- EitherT.right[Error](pendingOrdersRepo.remove(customId))
       d <- EitherT.right[Error](pendingCalculationRepo.shouldRecalculate)
       _ <- if (d) EitherT.liftF(handleOnSignal(preProcess)) else EitherT.rightT[F, Error](())
@@ -190,6 +203,7 @@ class Algo[F[_]: Applicative: Monad](
     } yield ()
 
   def handleOnOrderNak(
+      hzOrder: Order,
       customId: CustomId,
       errorMsg: String,
       preProcess: EitherT[F, Error, Order]
@@ -200,7 +214,7 @@ class Algo[F[_]: Applicative: Monad](
           logAlert(errorMsg)
         )
       )
-      _ <- handleOnOrderAck(customId, preProcess)
+      _ <- handleOnOrderAck(hzOrder, customId, preProcess)
     } yield ()
 }
 

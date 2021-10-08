@@ -1,13 +1,10 @@
 package guardian
 
-import cats.data.EitherT
 import com.ingalys.imc.BuySell
 import com.ingalys.imc.order.Order
 import guardian.Entities.CustomId
 
 object Fixtures {
-
-  val preProcess = EitherT.fromEither(order.asRight[Error])
 
   val id1            = "id1"
   val id2            = "id2"
