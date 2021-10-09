@@ -43,11 +43,11 @@ class AlgoTest extends AnyWordSpec with Matchers {
       } yield c
 
   "process" when {
-    "portfolio has enough position" when {
-      "there are three orders on BUY side with quantity increasing along time" should {
+    "there are three orders on BUY side with quantity increasing along time" when {
+      "calculated quantity is less than live orders quantity (trim: cancel or update)" when {
         val process = baseProcess(liveBuyOrders, portfolioQty)
-        "with enough qty in portfolio, create an UpdateOrder for o3" when {
-          "calculated quantity is more than o1 + o2 but less than o1 + o2 + o3 " in {
+        "calculated quantity is more than o1 + o2 but less than o1 + o2 + o3 and portfolio has enough position" should {
+          "create an UpdateOrder for o3 " in {
             val calQty = q1 + q2 + 100L
             val order  = Algo.createOrder(calQty, ulPrice, BuySell.BUY, CustomId.generate)
             val x      = process(order)
@@ -56,8 +56,8 @@ class AlgoTest extends AnyWordSpec with Matchers {
             y.order.getQuantityD shouldBe (calQty - q1 - q2)
           }
         }
-        "create a CancelOrder for o3" when {
-          "calculated quantity is equal to o1 + o2 " in {
+        "calculated quantity is equal to o1 + o2" should {
+          "create a CancelOrder for o3" in {
             val calQty = q1 + q2
             val order  = Algo.createOrder(calQty, ulPrice, BuySell.BUY, CustomId.generate)
             val x      = process(order)
@@ -66,8 +66,8 @@ class AlgoTest extends AnyWordSpec with Matchers {
             x.head.asInstanceOf[CancelOrder].order.getId shouldBe lastId
           }
         }
-        "create two CancelOrder for o2 and o3" when {
-          "calculated quantity is equal to o1" in {
+        "calculated quantity is equal to o1" should {
+          "create two CancelOrder for o2 and o3" in {
             val calQty = q1
             val order  = Algo.createOrder(calQty, ulPrice, BuySell.BUY, CustomId.generate)
             val x      = process(order)
@@ -77,8 +77,8 @@ class AlgoTest extends AnyWordSpec with Matchers {
             x.last.asInstanceOf[CancelOrder].order.getId shouldBe id2
           }
         }
-        "create 2 CancelOrder for o2, o3 and 1 UpdateOrder for o1" when {
-          "calculated quantity is less than q1" in {
+        "calculated quantity is less than q1" should {
+          "create 2 CancelOrder for o2, o3 and 1 UpdateOrder for o1" in {
             val calQty = q1 - 100
             val order  = Algo.createOrder(calQty, ulPrice, BuySell.BUY, CustomId.generate)
             val x      = process(order)
@@ -93,8 +93,8 @@ class AlgoTest extends AnyWordSpec with Matchers {
             y.order.getId shouldBe id1
           }
         }
-        "create 1 CancelOrder for o3 and 1 UpdateOrder for o2" when {
-          "calculated quantity is between o1 and o2" in {
+        "calculated quantity is between o1 and o2" should {
+          "create 1 CancelOrder for o3 and 1 UpdateOrder for o2" in {
             val calQty = q1 + 100
             val order  = Algo.createOrder(calQty, ulPrice, BuySell.BUY, CustomId.generate)
             val x      = process(order)
@@ -107,8 +107,8 @@ class AlgoTest extends AnyWordSpec with Matchers {
             y.order.getQuantityL shouldBe (calQty - q1)
           }
         }
-        "cancel all orders" when {
-          "calculated quantity is 0" in {
+        "calculated quantity is 0" should {
+          "should cancel all orders" in {
             val calQty = 0
             val order  = Algo.createOrder(calQty, ulPrice, BuySell.BUY, CustomId.generate)
             val x      = process(order)
@@ -116,37 +116,33 @@ class AlgoTest extends AnyWordSpec with Matchers {
             x.count(_.isInstanceOf[CancelOrder]) shouldBe 3
           }
         }
-      }
-      "live orders are empty and portfolio has enough position" should {
-        "return InsertOrder" when {
-          val process = baseProcess(List.empty, portfolioQty)
-          "selling" in {
-            val x = process(rawOrderSell)
-            x.size shouldBe 1
-            x.head.isInstanceOf[InsertOrder] shouldBe true
+        "if calculated quantity equals live orders' quantity" should {
+          "do nothing" in {
+            val calQty = q1 + q2 + q3
+            val order  = Algo.createOrder(calQty, ulPrice, BuySell.BUY, CustomId.generate)
+            val x      = process(order)
+            x.isEmpty shouldBe true
           }
         }
       }
-      "live orders are empty and portfolio has nothing" should {
-        val process = baseProcess(List.empty, 0L)
-        "return InsertOrder" when {
-          "buying" in {
-            val x = process(rawOrderBuy)
+    }
+    "live orders' direction clashes with that of calculated order" should {
+      val process = baseProcess(liveBuyOrders, portfolioQty)
+      "cancel all orders" in {
+        val x = process(rawOrderSell)
+        x.count(_.isInstanceOf[CancelOrder]) shouldBe liveBuyOrders.size
+      }
+    }
+    "calculated quantity is more than live orders quantity (should create one order)" when {
+      "buy" when {
+        "portfolio has zero" should {
+          "return InsertOrder with calculated quantity (buying doesn't depend on portfolio)" in {
+            val process = baseProcess(List.empty, 0L)
+            val x       = process(rawOrderBuy)
             x.size shouldBe 1
             x.head.isInstanceOf[InsertOrder] shouldBe true
           }
-        }
-      }
-      "live orders' direction clashes with that of order" should {
-        val process = baseProcess(liveBuyOrders, portfolioQty)
-        "cancel all orders" in {
-          val x = process(rawOrderSell)
-          x.count(_.isInstanceOf[CancelOrder]) shouldBe liveBuyOrders.size
-        }
-      }
-      "live orders exist and portfolio doesn't have enough for new InsertOrder" when {
-        "buying" should {
-          "return an InsertOrder normally as buying doesn't depend on portfolio" in {
+          "return InsertOrder with quantity equals calculated quantity deducted by live orders' quantity" in {
             val process = baseProcess(liveBuyOrders, 0L)
             val x       = process(rawOrderBuy)
             x.size shouldBe 1
@@ -154,47 +150,65 @@ class AlgoTest extends AnyWordSpec with Matchers {
               .map(_.getQuantityL)
               .sum
           }
-
         }
-        "selling" should {
-          "return an InsertOrder with quantity equal to what the portfolio has after deducted by live orders" in {
-            val extra     = 100
-            val portfolio = liveSellOrders.map(_.getQuantityL).sum + extra
-            val process   = baseProcess(liveSellOrders, portfolio)
-            val x         = process(rawOrderSell)
-            x.size shouldBe 1
-            x.head.asInstanceOf[InsertOrder].order.getQuantityL shouldBe extra
+      }
+      "sell" when {
+        "portfolio has enough position" when {
+          "there are no live orders" should {
+            "return InsertOrder with the original quantity" in {
+              val process = baseProcess(List.empty, portfolioQty)
+              val x       = process(rawOrderSell)
+              x.size shouldBe 1
+              x.head.isInstanceOf[InsertOrder] shouldBe true
+            }
+            "there are live orders" when {
+              "portfolio doesn't have enough for desired quantity" should {
+                "return an InsertOrder with quantity equal to what the portfolio has after deducted by live orders" in {
+                  val extra     = 100
+                  val portfolio = liveSellOrders.map(_.getQuantityL).sum + extra
+                  val process   = baseProcess(liveSellOrders, portfolio)
+                  val x         = process(rawOrderSell)
+                  x.size shouldBe 1
+                  x.head.asInstanceOf[InsertOrder].order.getQuantityL shouldBe extra
+                }
+              }
+              "portfolio has enough for desired quantity" should {
+                "return an InsertOrder normally" in {
+                  val portfolio = portfolioQty
+                  val process   = baseProcess(liveSellOrders, portfolio)
+                  val x         = process(rawOrderSell)
+                  x.size shouldBe 1
+                  x.head.asInstanceOf[InsertOrder].order.getQuantityL shouldBe rawOrderSell.getQuantityL - liveBuyOrders
+                    .map(_.getQuantityL)
+                    .sum
+                }
+              }
+            }
+          }
+          "portfolio has zero" should {
+            "should not send any order" in {
+              val process = baseProcess(liveSellOrders, 0L)
+              val x       = process(rawOrderSell)
+              x.isEmpty shouldBe true
+            }
           }
         }
       }
-      "live orders exist and portfolio has enough for new InsertOrder" when {
-        "selling" should {
-          "return an InsertOrder normally" in {
-            val portfolio = portfolioQty
-            val process   = baseProcess(liveSellOrders, portfolio)
-            val x         = process(rawOrderSell)
-            x.size shouldBe 1
-            x.head.asInstanceOf[InsertOrder].order.getQuantityL shouldBe rawOrderSell.getQuantityL - liveBuyOrders
-              .map(_.getQuantityL)
-              .sum
-          }
-        }
+    }
+    "order does not have rounded quantity" should {
+      "get the quantity rounded down to lot size" in {
+        val process = baseProcess(List.empty, portfolioQty)
+        val qty     = 6323
+        val order   = createTestOrder("someid", 10L, qty, ulPrice, BuySell.SELL, CustomId.generate)
+        val x       = process(order)
+        x.head.asInstanceOf[InsertOrder].order.getQuantityL % lotSize shouldBe 0
       }
-      "live orders don't exist when order with zero quantity arrives" should {
-        "not send any order" in {
-          val process = baseProcess(List.empty, 0L)
-          val x       = process(Algo.createOrder(0, ulPrice, BuySell.BUY, CustomId.generate))
-          x.size shouldBe 0
-        }
-      }
-      "order does not have rounded quantity" should {
-        "get the quantity rounded down to lot size" in {
-          val process = baseProcess(List.empty, portfolioQty)
-          val qty     = 6323
-          val order   = createTestOrder("someid", 10L, qty, ulPrice, BuySell.SELL, CustomId.generate)
-          val x       = process(order)
-          x.head.asInstanceOf[InsertOrder].order.getQuantityL % lotSize shouldBe 0
-        }
+    }
+    "calculated quantity is zero" should {
+      "not send any order" in {
+        val process = baseProcess(List.empty, 0L)
+        val x       = process(Algo.createOrder(0, ulPrice, BuySell.BUY, CustomId.generate))
+        x.size shouldBe 0
       }
     }
   }
