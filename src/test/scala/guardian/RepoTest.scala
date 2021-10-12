@@ -60,7 +60,7 @@ class RepoTest extends AnyFlatSpec {
   }
 
   it should "put, get, remove UpdateOrder" in {
-    val a = UpdateOrder(liveBuyOrders.head)
+    val a = UpdateOrder(createActiveOrderDescriptorView(liveBuyOrders.head), liveBuyOrders.head)
     pendingOrdersRepo.put(a)
 
     val b = pendingOrdersRepo.get(customBuyId1)
@@ -74,7 +74,7 @@ class RepoTest extends AnyFlatSpec {
   }
 
   it should "put, get, remove CancelOrder" in {
-    val a = CancelOrder(liveBuyOrders.head)
+    val a = CancelOrder(createActiveOrderDescriptorView(liveBuyOrders.head), liveBuyOrders.head)
     pendingOrdersRepo.put(a)
 
     val b = pendingOrdersRepo.get(customBuyId1)

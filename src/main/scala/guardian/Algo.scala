@@ -48,7 +48,7 @@ class Algo[F[_]: Applicative: Monad](
           createInsertOrder(order.getQuantityL, order.getPrice, order.getBuySell, availableQty).toList
         } else {
           if (order.getBuySell != a.head.order.getBuySell) {
-            a.map(p => createCancelOrder(p.order)) ++ createInsertOrder(
+            a.map(createCancelOrder) ++ createInsertOrder(
               order.getQuantityL,
               order.getPrice,
               order.getBuySell,
@@ -56,7 +56,7 @@ class Algo[F[_]: Applicative: Monad](
             ).toList // cancels are first
           } else {
             if (desiredQty < 0L) {
-              trimLiveOrders(a.map(_.order), order.getQuantityL, ListBuffer.empty)
+              trimLiveOrders(a, order.getQuantityL, ListBuffer.empty)
             } else {
               createInsertOrder(desiredQty, order.getPrice, order.getBuySell, availableQty).toList
             }
@@ -69,49 +69,58 @@ class Algo[F[_]: Applicative: Monad](
     action match {
       case InsertOrder(order) =>
         val rounded = order.getQuantityL / lotSize * lotSize
-        InsertOrder(createOrder(order, rounded))
-      case a @ UpdateOrder(_) => a
-      case a @ CancelOrder(_) => a
+        InsertOrder(cloneOrderWithNewQty(order, rounded))
+      case UpdateOrder(a, order) =>
+        val rounded = order.getQuantityL / lotSize * lotSize
+        UpdateOrder(a, cloneOrderWithNewQty(order, rounded))
+      case a @ CancelOrder(_, _) => a
     }
 
   def removeZeroQty(action: OrderAction): Boolean =
     action match {
-      case InsertOrder(order) => order.getQuantityL != 0L
-      case UpdateOrder(order) => order.getQuantityL != 0L
-      case CancelOrder(_)     => true
+      case InsertOrder(order)    => order.getQuantityL != 0L
+      case UpdateOrder(_, order) => order.getQuantityL != 0L
+      case CancelOrder(_, order) => order.getQuantityL != 0L
     }
 
   def calcTotalQty(orders: List[Order]): Long = orders.foldLeft(0L)((a: Long, b: Order) => a + b.getQuantityL)
 
-  val createCancelOrder: Order => OrderAction = o => CancelOrder(o)
+  val createCancelOrder: RepoOrder => OrderAction = o => CancelOrder(o.orderView, o.order)
 
   def createInsertOrder(desiredQty: Long, price: Double, buySell: Int, availableQty: Long): Option[OrderAction] =
     if (availableQty <= 0L) {
       None
-    } else if (availableQty <= desiredQty) {
-      Some(InsertOrder(createOrder(availableQty, price, buySell, CustomId.generate)))
     } else {
-      Some(InsertOrder(createOrder(desiredQty, price, buySell, CustomId.generate)))
+      val o = new Order()
+      o.setPrice(price)
+      o.setBuySell(buySell)
+      o.setCustomField(CustomId.field, CustomId.generate.v)
+      if (availableQty <= desiredQty) {
+        o.setQuantity(availableQty)
+      } else {
+        o.setQuantity(desiredQty)
+      }
+      Some(InsertOrder(o))
     }
 
   @tailrec
   final def trimLiveOrders(
-      liveOrders: List[Order],
+      liveOrders: List[RepoOrder],
       calculatedQuantity: Long,
       res: ListBuffer[OrderAction]
   ): List[OrderAction] = {
     val head :: rest = liveOrders
-    val liveQty      = rest.foldLeft(0L)((x: Long, y: Order) => x + y.getQuantityL)
+    val liveQty      = rest.foldLeft(0L)((x: Long, y: RepoOrder) => x + y.order.getQuantityL)
     if (liveQty < calculatedQuantity) {
       val remainder = calculatedQuantity - liveQty
-      val o         = cloneModifyOrder(head, remainder, head.getPrice, head.getBuySell)
-      res += UpdateOrder(o)
+      val o         = cloneModifyOrder(head.order, remainder, head.order.getPrice, head.order.getBuySell)
+      res += UpdateOrder(head.orderView, o)
       res.toList
     } else if (liveQty == calculatedQuantity) {
-      res += CancelOrder(head)
+      res += CancelOrder(head.orderView, head.order)
       res.toList
     } else {
-      res += CancelOrder(head)
+      res += CancelOrder(head.orderView, head.order)
       trimLiveOrders(rest, calculatedQuantity, res)
     }
   }
@@ -238,22 +247,15 @@ object Algo {
     } yield b
   }
 
-  def createOrder(qty: Long, prc: Double, buysell: Int, customId: CustomId): Order = {
+  def cloneOrderWithNewQty(order: Order, newQty: Long): Order = {
     val o = new Order()
-    o.setQuantity(qty)
-    o.setPrice(prc)
-    o.setBuySell(buysell)
-    o.setCustomField(CustomId.field, customId.v)
+    o.setId(order.getId)
+    o.setQuantity(newQty)
+    o.setPrice(order.getPrice)
+    o.setBuySell(order.getBuySell)
+    o.setCustomField(CustomId.field, order.getCustomField(CustomId.field).asInstanceOf[String])
     o
   }
-
-  def createOrder(order: Order, newQty: Long): Order =
-    createOrder(
-      newQty,
-      order.getPrice,
-      order.getBuySell,
-      CustomId(order.getCustomField(CustomId.field).asInstanceOf[String])
-    )
 
   @tailrec
   def getPriceAfterTicks(isPlus: Boolean, price: BigDecimal, ticks: Int = 5): BigDecimal = {

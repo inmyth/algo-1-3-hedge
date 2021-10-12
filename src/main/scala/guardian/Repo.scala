@@ -83,9 +83,9 @@ class PendingOrdersInMemInterpreter[F[_]: Applicative] extends PendingOrdersAlge
 
   override def put(act: OrderAction): F[Unit] = {
     act match {
-      case OrderAction.InsertOrder(order) => db += (CustomId.fromOrder(order).v -> act)
-      case OrderAction.UpdateOrder(order) => db += (CustomId.fromOrder(order).v -> act)
-      case OrderAction.CancelOrder(order) => db += (CustomId.fromOrder(order).v -> act)
+      case OrderAction.InsertOrder(order)    => db += (CustomId.fromOrder(order).v -> act)
+      case OrderAction.UpdateOrder(_, order) => db += (CustomId.fromOrder(order).v -> act)
+      case OrderAction.CancelOrder(_, order) => db += (CustomId.fromOrder(order).v -> act)
     }
     Applicative[F].unit
   }

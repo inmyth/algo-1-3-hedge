@@ -38,7 +38,12 @@ class AlgoTest extends AnyWordSpec with Matchers {
       for {
         a <- createApp[Id]().pure[Id]
         _ <- a.portfolioRepo.put(symbol, Portfolio(symbol, portfolioQty))
-        _ = liveOrders.foreach(p => a.liveOrdersRepo.putOrder(symbol, RepoOrder(createActiveOrderDescriptorView(p), p)))
+        _ <-
+          liveOrders
+            .foreach(p => {
+              a.liveOrdersRepo.putOrder(symbol, RepoOrder(createActiveOrderDescriptorView(p), p))
+            })
+            .pure[Id]
         c <- a.process(EitherT.fromEither(order.asRight[Error]))
       } yield c
 
@@ -49,7 +54,7 @@ class AlgoTest extends AnyWordSpec with Matchers {
         "calculated quantity is more than o1 + o2 but less than o1 + o2 + o3 and portfolio has enough position" should {
           "create an UpdateOrder for o3 " in {
             val calQty = q1 + q2 + 100L
-            val order  = Algo.createOrder(calQty, ulPrice, BuySell.BUY, CustomId.generate)
+            val order  = createPreProcessOrder(calQty, ulPrice, BuySell.BUY, CustomId.generate)
             val x      = process(order)
             x.head.isInstanceOf[UpdateOrder] shouldBe true
             val y = x.head.asInstanceOf[UpdateOrder]
@@ -59,7 +64,7 @@ class AlgoTest extends AnyWordSpec with Matchers {
         "calculated quantity is equal to o1 + o2" should {
           "create a CancelOrder for o3" in {
             val calQty = q1 + q2
-            val order  = Algo.createOrder(calQty, ulPrice, BuySell.BUY, CustomId.generate)
+            val order  = createPreProcessOrder(calQty, ulPrice, BuySell.BUY, CustomId.generate)
             val x      = process(order)
             x.size shouldBe 1
             x.head.isInstanceOf[CancelOrder] shouldBe true
@@ -69,7 +74,7 @@ class AlgoTest extends AnyWordSpec with Matchers {
         "calculated quantity is equal to o1" should {
           "create two CancelOrder for o2 and o3" in {
             val calQty = q1
-            val order  = Algo.createOrder(calQty, ulPrice, BuySell.BUY, CustomId.generate)
+            val order  = createPreProcessOrder(calQty, ulPrice, BuySell.BUY, CustomId.generate)
             val x      = process(order)
             x.size shouldBe 2
             x.count(_.isInstanceOf[CancelOrder]) shouldBe 2
@@ -80,7 +85,7 @@ class AlgoTest extends AnyWordSpec with Matchers {
         "calculated quantity is less than q1" should {
           "create 2 CancelOrder for o2, o3 and 1 UpdateOrder for o1" in {
             val calQty = q1 - 100
-            val order  = Algo.createOrder(calQty, ulPrice, BuySell.BUY, CustomId.generate)
+            val order  = createPreProcessOrder(calQty, ulPrice, BuySell.BUY, CustomId.generate)
             val x      = process(order)
             x.size shouldBe 3
             x.head.isInstanceOf[CancelOrder] shouldBe true
@@ -96,7 +101,7 @@ class AlgoTest extends AnyWordSpec with Matchers {
         "calculated quantity is between o1 and o2" should {
           "create 1 CancelOrder for o3 and 1 UpdateOrder for o2" in {
             val calQty = q1 + 100
-            val order  = Algo.createOrder(calQty, ulPrice, BuySell.BUY, CustomId.generate)
+            val order  = createPreProcessOrder(calQty, ulPrice, BuySell.BUY, CustomId.generate)
             val x      = process(order)
             x.size shouldBe 2
             x.head.isInstanceOf[CancelOrder] shouldBe true
@@ -110,7 +115,7 @@ class AlgoTest extends AnyWordSpec with Matchers {
         "calculated quantity is 0" should {
           "should cancel all orders" in {
             val calQty = 0
-            val order  = Algo.createOrder(calQty, ulPrice, BuySell.BUY, CustomId.generate)
+            val order  = createPreProcessOrder(calQty, ulPrice, BuySell.BUY, CustomId.generate)
             val x      = process(order)
             x.size shouldBe 3
             x.count(_.isInstanceOf[CancelOrder]) shouldBe 3
@@ -119,7 +124,7 @@ class AlgoTest extends AnyWordSpec with Matchers {
         "if calculated quantity equals live orders' quantity" should {
           "do nothing" in {
             val calQty = q1 + q2 + q3
-            val order  = Algo.createOrder(calQty, ulPrice, BuySell.BUY, CustomId.generate)
+            val order  = createPreProcessOrder(calQty, ulPrice, BuySell.BUY, CustomId.generate)
             val x      = process(order)
             x.isEmpty shouldBe true
           }
@@ -207,7 +212,7 @@ class AlgoTest extends AnyWordSpec with Matchers {
     "calculated quantity is zero" should {
       "not send any order" in {
         val process = baseProcess(List.empty, 0L)
-        val x       = process(Algo.createOrder(0, ulPrice, BuySell.BUY, CustomId.generate))
+        val x       = process(createPreProcessOrder(0, ulPrice, BuySell.BUY, CustomId.generate))
         x.size shouldBe 0
       }
     }

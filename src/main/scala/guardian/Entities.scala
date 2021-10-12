@@ -11,9 +11,9 @@ object Entities {
 
   sealed trait OrderAction
   object OrderAction {
-    case class InsertOrder(order: Order) extends OrderAction
-    case class UpdateOrder(order: Order) extends OrderAction
-    case class CancelOrder(order: Order) extends OrderAction
+    case class InsertOrder(order: Order)                                                       extends OrderAction
+    case class UpdateOrder(activeOrderDescriptorView: ActiveOrderDescriptorView, order: Order) extends OrderAction
+    case class CancelOrder(activeOrderDescriptorView: ActiveOrderDescriptorView, order: Order) extends OrderAction
   }
 
   sealed trait Direction

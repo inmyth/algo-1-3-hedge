@@ -52,6 +52,15 @@ object Fixtures {
     o
   }
 
+  def createPreProcessOrder(qty: Long, price: Double, buySell: Int, customId: CustomId): Order = {
+    val o = new Order()
+    o.setQuantity(qty)
+    o.setPrice(price)
+    o.setBuySell(buySell)
+    o.setCustomField(CustomId.field, customId)
+    o
+  }
+
   def createActiveOrderDescriptorView(order: Order): ActiveOrderDescriptorView =
     new ActiveOrderDescriptorView(InstrumentDescriptor.newInstrumentDescriptor(null, null, symbol, symbol), order)
 }
