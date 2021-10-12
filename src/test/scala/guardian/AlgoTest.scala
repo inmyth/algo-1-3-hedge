@@ -6,7 +6,7 @@ import cats.{Id, Monad}
 import com.ingalys.imc.BuySell
 import com.ingalys.imc.order.Order
 import guardian.Entities.OrderAction.{CancelOrder, InsertOrder, UpdateOrder}
-import guardian.Entities.{CustomId, OrderAction, Portfolio}
+import guardian.Entities.{CustomId, OrderAction, Portfolio, RepoOrder}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers.convertToAnyShouldWrapper
 import guardian.Fixtures.{lastId, _}
@@ -38,7 +38,7 @@ class AlgoTest extends AnyWordSpec with Matchers {
       for {
         a <- createApp[Id]().pure[Id]
         _ <- a.portfolioRepo.put(symbol, Portfolio(symbol, portfolioQty))
-        _ = liveOrders.foreach(a.liveOrdersRepo.putOrder(symbol, _))
+        _ = liveOrders.foreach(p => a.liveOrdersRepo.putOrder(symbol, RepoOrder(createActiveOrderDescriptorView(p), p)))
         c <- a.process(EitherT.fromEither(order.asRight[Error]))
       } yield c
 
@@ -236,29 +236,13 @@ class AlgoTest extends AnyWordSpec with Matchers {
   }
 
   "handleOnOrderAck" should {
-    "return Left" when {
-      "order is not available in the pending repo" in {
-        val x = for {
-          a <- createApp[Id]().pure[Id]
-          c = a.handleOnOrderAck(
-            rawOrderBuy,
-            CustomId.fromOrder(rawOrderBuy),
-            EitherT.fromEither(rawOrderBuy.asRight[Error])
-          )
-        } yield c
-        x.value shouldBe Left(
-          Error.UnknownError(s"Pending order not found, custom id:${rawOrderBuy.getCustomField(CustomId.field)}")
-        )
-      }
-    }
     "return Right" when {
       "order exists in the pending repo" in {
         val x = for {
           a <- createApp[Id]().pure[Id]
           _ <- a.pendingOrdersRepo.put(InsertOrder(rawOrderBuy))
           c = a.handleOnOrderAck(
-            rawOrderBuy,
-            CustomId.fromOrder(rawOrderBuy),
+            createActiveOrderDescriptorView(rawOrderBuy),
             EitherT.fromEither(rawOrderBuy.asRight[Error])
           )
         } yield c

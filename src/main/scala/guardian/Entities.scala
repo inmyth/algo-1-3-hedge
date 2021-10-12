@@ -1,6 +1,7 @@
 package guardian
 
 import com.ingalys.imc.order.Order
+import horizontrader.services.collectors.persistent.ActiveOrderDescriptorView
 
 import java.util.UUID
 
@@ -35,6 +36,8 @@ object Entities {
   }
 
   case class DwData(projVolume: Long, projPrice: Double, direction: Direction)
+
+  case class RepoOrder(orderView: ActiveOrderDescriptorView, order: Order)
 
   //  def getMarketMakerBid(): F[Error Either BigDecimal]
 

@@ -3,13 +3,15 @@ package guardian
 import com.ingalys.imc.BuySell
 import com.ingalys.imc.order.Order
 import guardian.Entities.CustomId
+import horizontrader.services.collectors.persistent.ActiveOrderDescriptorView
+import horizontrader.services.instruments.InstrumentDescriptor
 
 object Fixtures {
 
+  val symbol: String = "PTT"
   val id1            = "id1"
   val id2            = "id2"
   val lastId         = "id3"
-  val symbol: String = "PTT"
   val lotSize        = 100
   val ulPrice        = 50.0
   val portfolioQty   = 8000L
@@ -49,4 +51,7 @@ object Fixtures {
     o.setCustomField(CustomId.field, customId.v)
     o
   }
+
+  def createActiveOrderDescriptorView(order: Order): ActiveOrderDescriptorView =
+    new ActiveOrderDescriptorView(InstrumentDescriptor.newInstrumentDescriptor(null, null, symbol, symbol), order)
 }

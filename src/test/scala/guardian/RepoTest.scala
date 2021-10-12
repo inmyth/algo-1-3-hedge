@@ -3,7 +3,7 @@ package guardian
 import cats.Id
 import com.ingalys.imc.BuySell
 import guardian.Entities.OrderAction.{CancelOrder, InsertOrder, UpdateOrder}
-import guardian.Entities.Portfolio
+import guardian.Entities.{Portfolio, RepoOrder}
 import guardian.Fixtures._
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers.convertToAnyShouldWrapper
@@ -15,9 +15,9 @@ class RepoTest extends AnyFlatSpec {
   val liveRepo = new LiveOrdersInMemInterpreter[Id]
 
   it should "append order, return all orders sorted by time down, remove order" in {
-    liveBuyOrders.foreach(liveRepo.putOrder(symbol, _))
+    liveBuyOrders.foreach(p => liveRepo.putOrder(symbol, RepoOrder(createActiveOrderDescriptorView(p), p)))
     val a = liveRepo.getOrder(symbol, id1)
-    a.get.getId shouldBe id1
+    a.get.orderView.getOrderCopy.getId shouldBe id1
     val b = liveRepo.getOrdersByTimeSortedDown(symbol)
     b.size shouldBe liveBuyOrders.size
 

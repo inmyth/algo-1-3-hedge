@@ -2,36 +2,37 @@ package guardian
 
 import cats.Applicative
 import com.ingalys.imc.order.Order
-import guardian.Entities.{CustomId, OrderAction, Portfolio}
+import guardian.Entities.{CustomId, OrderAction, Portfolio, RepoOrder}
+import horizontrader.services.collectors.persistent.ActiveOrderDescriptorView
 
 import scala.language.higherKinds
 
 abstract class LiveOrdersRepoAlgebra[F[_]] {
 
-  def putOrder(symbol: String, order: Order): F[Unit]
+  def putOrder(symbol: String, order: RepoOrder): F[Unit]
 
-  def getOrdersByTimeSortedDown(symbol: String): F[List[Order]]
+  def getOrdersByTimeSortedDown(symbol: String): F[List[RepoOrder]]
 
-  def getOrder(symbol: String, id: String): F[Option[Order]]
+  def getOrder(symbol: String, id: String): F[Option[RepoOrder]]
 
   def removeOrder(symbol: String, id: String): F[Unit]
 }
 
 class LiveOrdersInMemInterpreter[F[_]: Applicative] extends LiveOrdersRepoAlgebra[F] {
-  private var db: Map[String, Map[String, Order]] = Map.empty
+  private var db: Map[String, Map[String, RepoOrder]] = Map.empty
 
-  override def putOrder(symbol: String, order: Order): F[Unit] = {
+  override def putOrder(symbol: String, repoOrder: RepoOrder): F[Unit] = {
     val subMap = db.getOrElse(symbol, Map.empty)
-    db += (symbol -> (subMap + (order.getId -> order)))
+    db += (symbol -> (subMap + (repoOrder.order.getId -> repoOrder)))
     Applicative[F].unit
   }
 
-  override def getOrdersByTimeSortedDown(symbol: String): F[List[Order]] =
+  override def getOrdersByTimeSortedDown(symbol: String): F[List[RepoOrder]] =
     Applicative[F].pure(
-      db.getOrElse(symbol, Map.empty).values.toList.sortWith(_.getTimestampNanos > _.getTimestampNanos)
+      db.getOrElse(symbol, Map.empty).values.toList.sortWith(_.order.getTimestampNanos > _.order.getTimestampNanos)
     )
 
-  override def getOrder(symbol: String, id: String): F[Option[Order]] =
+  override def getOrder(symbol: String, id: String): F[Option[RepoOrder]] =
     Applicative[F].pure {
       db.getOrElse(symbol, Map.empty).get(id)
     }

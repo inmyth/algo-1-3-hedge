@@ -9,9 +9,10 @@ import com.ingalys.imc.order.Order
 import guardian.Algo._
 import guardian.Entities.OrderAction.{CancelOrder, InsertOrder, UpdateOrder}
 import guardian.Entities.PutCall.{CALL, PUT}
-import guardian.Entities.{CustomId, Direction, OrderAction, Portfolio, PutCall}
+import guardian.Entities.{CustomId, Direction, OrderAction, Portfolio, PutCall, RepoOrder}
 import guardian.Error.UnknownError
 import horizontrader.plugins.hmm.connections.service.IDictionaryProvider
+import horizontrader.services.collectors.persistent.ActiveOrderDescriptorView
 import horizontrader.services.instruments.InstrumentDescriptor
 
 import scala.annotation.tailrec
@@ -34,7 +35,7 @@ class Algo[F[_]: Applicative: Monad](
     for {
       a <- liveOrdersRepo.getOrdersByTimeSortedDown(underlyingSymbol)
       _ = logInfo(s"Algo 1. Live orders: $a")
-      b <- Monad[F].pure(calcTotalQty(a))
+      b <- Monad[F].pure(calcTotalQty(a.map(_.order)))
       _ = logInfo(s"Algo 2. Live orders total qty: $b")
       c <- portfolioRepo.get(underlyingSymbol)
       d <- Monad[F].pure {
@@ -46,8 +47,8 @@ class Algo[F[_]: Applicative: Monad](
         if (a.isEmpty) {
           createInsertOrder(order.getQuantityL, order.getPrice, order.getBuySell, availableQty).toList
         } else {
-          if (order.getBuySell != a.head.getBuySell) {
-            a.map(createCancelOrder) ++ createInsertOrder(
+          if (order.getBuySell != a.head.order.getBuySell) {
+            a.map(p => createCancelOrder(p.order)) ++ createInsertOrder(
               order.getQuantityL,
               order.getPrice,
               order.getBuySell,
@@ -55,7 +56,7 @@ class Algo[F[_]: Applicative: Monad](
             ).toList // cancels are first
           } else {
             if (desiredQty < 0L) {
-              trimLiveOrders(a, order.getQuantityL, ListBuffer.empty)
+              trimLiveOrders(a.map(_.order), order.getQuantityL, ListBuffer.empty)
             } else {
               createInsertOrder(desiredQty, order.getPrice, order.getBuySell, availableQty).toList
             }
@@ -77,7 +78,7 @@ class Algo[F[_]: Applicative: Monad](
     action match {
       case InsertOrder(order) => order.getQuantityL != 0L
       case UpdateOrder(order) => order.getQuantityL != 0L
-      case CancelOrder(order) => order.getQuantityL != 0L
+      case CancelOrder(_)     => true
     }
 
   def calcTotalQty(orders: List[Order]): Long = orders.foldLeft(0L)((a: Long, b: Order) => a + b.getQuantityL)
@@ -123,11 +124,11 @@ class Algo[F[_]: Applicative: Monad](
     newOrder
   }
 
-  def updateLiveOrders(act: OrderAction): F[Unit] =
-    act match {
-      case InsertOrder(order) => liveOrdersRepo.putOrder(underlyingSymbol, order)
-      case UpdateOrder(order) => liveOrdersRepo.putOrder(underlyingSymbol, order)
-      case CancelOrder(order) => liveOrdersRepo.removeOrder(underlyingSymbol, order.getId)
+  def updateLiveOrders(activeOrderDescriptorView: ActiveOrderDescriptorView, order: Order): F[Unit] =
+    activeOrderDescriptorView.getAction match {
+      case 1 | 2 => liveOrdersRepo.putOrder(underlyingSymbol, RepoOrder(activeOrderDescriptorView, order))
+      case 3     => liveOrdersRepo.removeOrder(underlyingSymbol, order.getId)
+      case _     => ().pure[F]
     }
 
   def process(preProcess: EitherT[F, Error, Order]): F[List[OrderAction]] =
@@ -180,22 +181,14 @@ class Algo[F[_]: Applicative: Monad](
         Left(e)
     }
 
-  def replaceOrderActionContent(action: OrderAction, hzOrder: Order): OrderAction =
-    action match {
-      case InsertOrder(_) => InsertOrder(hzOrder)
-      case UpdateOrder(_) => UpdateOrder(hzOrder)
-      case CancelOrder(_) => CancelOrder(hzOrder)
-    }
-
   def handleOnOrderAck(
-      hzOrder: Order,
-      customId: CustomId,
+      activeOrderDescriptorView: ActiveOrderDescriptorView,
       preProcess: EitherT[F, Error, Order]
   ): EitherT[F, Error, Unit] =
     for {
-      a <- getPendingOrderAction(customId)
-      b <- EitherT.rightT[F, Error](replaceOrderActionContent(a, hzOrder))
-      _ <- EitherT.right[Error](updateLiveOrders(b))
+      a <- EitherT.rightT[F, Error](activeOrderDescriptorView.getOrderCopy)
+      customId = CustomId.fromOrder(a)
+      _ <- EitherT.right[Error](updateLiveOrders(activeOrderDescriptorView, a))
       _ <- EitherT.right[Error](pendingOrdersRepo.remove(customId))
       d <- EitherT.right[Error](pendingCalculationRepo.shouldRecalculate)
       _ <- EitherT.right[Error](pendingCalculationRepo.deactivate())
@@ -210,9 +203,7 @@ class Algo[F[_]: Applicative: Monad](
     for {
       _ <- EitherT.rightT[F, Error](logAlert(errorMsg))
       _ <- EitherT.right[Error](pendingOrdersRepo.remove(customId))
-      d <- EitherT.right[Error](pendingCalculationRepo.shouldRecalculate)
       _ <- EitherT.right[Error](pendingCalculationRepo.deactivate())
-      _ <- if (d) EitherT(handleOnSignal(preProcess)) else EitherT.rightT[F, Error](())
     } yield ()
 }
 
