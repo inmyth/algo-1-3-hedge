@@ -2,18 +2,14 @@ package guardian
 
 import cats.data.EitherT
 import cats.implicits._
-import cats.{Applicative, Id, Monad}
+import cats.{Applicative, Monad}
 import com.ingalys.imc.BuySell
-import com.ingalys.imc.dict.Element
 import com.ingalys.imc.order.Order
 import guardian.Algo._
 import guardian.Entities.OrderAction.{CancelOrder, InsertOrder, UpdateOrder}
-import guardian.Entities.PutCall.{CALL, PUT}
-import guardian.Entities.{CustomId, Direction, OrderAction, Portfolio, PutCall, RepoOrder}
+import guardian.Entities.{CustomId, OrderAction, Portfolio, RepoOrder}
 import guardian.Error.UnknownError
-import horizontrader.plugins.hmm.connections.service.IDictionaryProvider
 import horizontrader.services.collectors.persistent.ActiveOrderDescriptorView
-import horizontrader.services.instruments.InstrumentDescriptor
 
 import scala.annotation.tailrec
 import scala.collection.mutable.ListBuffer
@@ -26,7 +22,7 @@ class Algo[F[_]: Applicative: Monad](
     val pendingCalculationRepo: PendingCalculationAlgebra[F],
     underlyingSymbol: String,
     lotSize: Int,
-    sendOrder: (OrderAction) => Order,
+    sendOrder: OrderAction => Order,
     logAlert: String => Unit,
     logInfo: String => Unit,
     logError: String => Unit
@@ -97,7 +93,7 @@ class Algo[F[_]: Applicative: Monad](
     action match {
       case InsertOrder(order)    => order.getQuantityL != 0L
       case UpdateOrder(_, order) => order.getQuantityL != 0L
-      case CancelOrder(_, order) => true
+      case CancelOrder(_, _)     => true
     }
 
   def calcTotalQty(orders: List[Order]): Long = orders.foldLeft(0L)((a: Long, b: Order) => a + b.getQuantityL)
@@ -228,8 +224,7 @@ class Algo[F[_]: Applicative: Monad](
 
   def handleOnOrderNak(
       customId: CustomId,
-      errorMsg: String,
-      preProcess: EitherT[F, Error, Order]
+      errorMsg: String
   ): EitherT[F, Error, Unit] =
     for {
       _ <- EitherT.rightT[F, Error](logAlert(errorMsg))
@@ -243,7 +238,7 @@ object Algo {
       underlyingSymbol: String,
       lotSize: Int,
       portfolioQty: Long,
-      sendOrder: (OrderAction) => Order,
+      sendOrder: OrderAction => Order,
       logAlert: String => Unit,
       logInfo: String => Unit,
       logError: String => Unit
