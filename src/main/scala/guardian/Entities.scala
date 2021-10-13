@@ -38,19 +38,4 @@ object Entities {
   case class DwData(projVolume: Long, projPrice: Double, direction: Direction)
 
   case class RepoOrder(orderView: ActiveOrderDescriptorView, order: Order)
-
-  //  def getMarketMakerBid(): F[Error Either BigDecimal]
-
-  //  def getMarketMakerAsk(): F[Error Either BigDecimal] // Automaton = Market maker
-
-//  def getProjectedPrice(): F[Error Either BigDecimal] // this can come from Horizon
-//
-//  def getProjectedVolume(): F[Error Either Int] // comes from Horizon but needs to be adjusted
-//
-//  def getHedgeRatio(): F[Error Either BigDecimal]
-//
-//  def getResidual() = ???
-//
-//  def getLastUnderlyingProjectedPrice(): F[Error Either BigDecimal]
-
 }
