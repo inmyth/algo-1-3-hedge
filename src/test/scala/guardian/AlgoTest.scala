@@ -190,10 +190,11 @@ class AlgoTest extends AnyWordSpec with Matchers {
               }
             }
           }
-          "portfolio has zero" should {
+          "portfolio doesn't have enough for new order" should {
             "should not send any order" in {
-              val process = baseProcess(liveSellOrders, 0L)
+              val process = baseProcess(liveSellOrders, liveSellOrders.map(_.getQuantityL).sum)
               val x       = process(rawOrderSell)
+              println(x)
               x.isEmpty shouldBe true
             }
           }

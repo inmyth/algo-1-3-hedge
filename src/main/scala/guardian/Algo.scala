@@ -35,45 +35,47 @@ class Algo[F[_]: Applicative: Monad](
     for {
       a <- liveOrdersRepo.getOrdersByTimeSortedDown(underlyingSymbol)
       _ = logInfo(s"Algo 1. Live orders: $a")
-      b <- Monad[F].pure(calcTotalQty(a.map(_.order)))
-      _ = logInfo(s"Algo 2. Live orders qty: $b")
-      c <- portfolioRepo.get(underlyingSymbol)
+      liveQty <- Monad[F].pure(calcTotalQty(a.map(_.order)))
+      c       <- portfolioRepo.get(underlyingSymbol)
       d <- Monad[F].pure {
-        val desiredQty   = order.getQuantityL - b
-        val availableQty = if (order.getBuySell == BuySell.BUY) Long.MaxValue else c.position - b
+        val totalResidual = order.getQuantityL
+        val position      = if (order.getBuySell == BuySell.BUY) Long.MaxValue else c.position
         logInfo(
-          s"Algo 3a. Total residual: ${order.getQuantityL}, live orders qty$b, portfolio: ${c.position}"
-        )
-        logInfo(
-          s"Algo 3b. Calculated qty: $desiredQty, available qty: $availableQty"
+          s"Algo 2a. Total residual: $totalResidual, live orders: $liveQty, portfolio: $position"
         )
         if (a.isEmpty) {
           logInfo(
-            s"Algo 3c. create a new insert with qty: ${order.getQuantityL}"
+            s"Algo 2b. Live order is empty. Will create a new insert with qty: ${order.getQuantityL}"
           )
-          createInsertOrder(order.getQuantityL, order.getPrice, order.getBuySell, availableQty).toList
+          List(createInsertOrder(totalResidual, position, liveQty, order.getPrice, order.getBuySell))
         } else {
           if (order.getBuySell != a.head.order.getBuySell) {
             logInfo(
-              s"Algo 3c. Direction changed from ${a.head.order.getBuySell} to ${order.getBuySell}. Cancel all live orders and create a new insert with qty: ${order.getQuantityL}"
+              s"Algo 2b. Direction changed from ${a.head.order.getBuySell} to ${order.getBuySell}. Cancel all live orders and create a new insert with qty: ${order.getQuantityL}"
             )
-            a.map(createCancelOrder) ++ createInsertOrder(
-              order.getQuantityL,
+            a.map(createCancelOrder) :+ createInsertOrder(
+              totalResidual,
+              position,
+              liveQty,
               order.getPrice,
-              order.getBuySell,
-              c.position
-            ).toList // cancels are first
+              order.getBuySell
+            ) // cancels are first
           } else {
-            if (desiredQty < 0L) {
+            if (totalResidual < liveQty) {
               logInfo(
-                s"Algo 3c. Calculated qty is smaller than live orders. Will update or cancel."
+                s"Algo 2b. Calculated qty is smaller than live orders. Will update or cancel."
               )
               trimLiveOrders(a, order.getQuantityL, ListBuffer.empty)
+            } else if (totalResidual == liveQty) {
+              logInfo(
+                s"Algo 2b. Calculated qty is the same as live orders. Will do nothing."
+              )
+              List.empty[OrderAction]
             } else {
               logInfo(
-                s"Algo 3c. Calculated qty is the same or larger than live orders. If larger, will create a new order."
+                s"Algo 2b. Calculated qty is larger than live orders. Will create a new order."
               )
-              createInsertOrder(desiredQty, order.getPrice, order.getBuySell, availableQty).toList
+              List(createInsertOrder(totalResidual, position, liveQty, order.getPrice, order.getBuySell))
             }
           }
         }
@@ -102,18 +104,21 @@ class Algo[F[_]: Applicative: Monad](
 
   val createCancelOrder: RepoOrder => OrderAction = o => CancelOrder(o.orderView, o.order)
 
-  def createInsertOrder(desiredQty: Long, price: Double, buySell: Int, availableQty: Long): Option[OrderAction] =
-    if (availableQty <= 0L) {
-      None
-    } else {
-      val o = new Order()
-      o.setPrice(price)
-      o.setBuySell(buySell)
-      o.setCustomField(CustomId.field, CustomId.generate.v)
-      val which = if (availableQty <= desiredQty) availableQty else desiredQty
-      o.setQuantity(which)
-      Some(InsertOrder(o))
-    }
+  def createInsertOrder(
+      totalResidual: Long,
+      position: Long,
+      liveQty: Long,
+      price: Double,
+      buySell: Int
+  ): OrderAction = {
+    val o = new Order()
+    o.setPrice(price)
+    o.setBuySell(buySell)
+    o.setCustomField(CustomId.field, CustomId.generate.v)
+    val qty = if (totalResidual >= position) position - liveQty else totalResidual - liveQty
+    o.setQuantity(qty)
+    InsertOrder(o)
+  }
 
   @tailrec
   final def trimLiveOrders(
