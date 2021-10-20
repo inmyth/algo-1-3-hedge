@@ -2,7 +2,9 @@ package guardian
 
 import com.ingalys.imc.BuySell
 import com.ingalys.imc.order.Order
+import guardian.Algo.{DW, MyScenarioStatus}
 import guardian.Entities.CustomId
+import guardian.Entities.PutCall.CALL
 import horizontrader.services.collectors.persistent.ActiveOrderDescriptorView
 import horizontrader.services.instruments.InstrumentDescriptor
 
@@ -40,6 +42,44 @@ object Fixtures {
 
   val rawOrderBuy  = createTestOrder(id1, 10L, 7200L, 50.0, BuySell.BUY, customBuyId1)
   val rawOrderSell = createTestOrder(id2, 11L, 6500L, 50.0, BuySell.SELL, customSellId1)
+
+  val dw = DW(
+    uniqueId = "RBF24C2201A@XBKK",
+    projectedPrice = Some(0.25),
+    projectedVol = Some(25100),
+    delta = Some(0.06681047005390554),
+    putCall = Some(CALL),
+    marketSells = Vector(
+      MyScenarioStatus(0.26, 1033000),
+      MyScenarioStatus(0.27, 1091900),
+      MyScenarioStatus(0.28, 1034400),
+      MyScenarioStatus(0.29, 1094000),
+      MyScenarioStatus(0.3, 1049800)
+    ),
+    marketBuys = Vector(
+      MyScenarioStatus(0.25, 10000),
+      MyScenarioStatus(0.24, 25100),
+      MyScenarioStatus(0.23, 2046700),
+      MyScenarioStatus(0.22, 1007700),
+      MyScenarioStatus(0.21, 1055000)
+    ),
+    ownSellStatusesDefault = Vector(
+      MyScenarioStatus(0.26, 1007900),
+      MyScenarioStatus(0.27, 1091900),
+      MyScenarioStatus(0.28, 1034400),
+      MyScenarioStatus(0.29, 1094000),
+      MyScenarioStatus(0.3, 1049800)
+    ),
+    ownBuyStatusesDefault = Vector(
+      MyScenarioStatus(0.22, 1007700),
+      MyScenarioStatus(0.21, 1055000),
+      MyScenarioStatus(0.2, 1007700),
+      MyScenarioStatus(0.19, 1096600),
+      MyScenarioStatus(0.23, 1046700)
+    ),
+    ownSellStatusesDynamic = Vector(MyScenarioStatus(0.26, 25100)),
+    ownBuyStatusesDynamic = Vector(MyScenarioStatus(0.24, 25100))
+  )
 
   def createTestOrder(hzId: String, nanos: Long, qty: Long, price: Double, buySell: Int, customId: CustomId): Order = {
     val o = new Order()

@@ -3,17 +3,19 @@ package guardian
 import cats.data.EitherT
 import cats.implicits._
 import cats.{Applicative, Monad}
+import com.hsoft.scenario.status.ScenarioStatus
 import com.ingalys.imc.BuySell
 import com.ingalys.imc.order.Order
 import guardian.Algo._
 import guardian.Entities.OrderAction.{CancelOrder, InsertOrder, UpdateOrder}
-import guardian.Entities.{CustomId, OrderAction, Portfolio, RepoOrder}
+import guardian.Entities.{CustomId, OrderAction, Portfolio, PutCall, RepoOrder}
 import guardian.Error.UnknownError
 import horizontrader.services.collectors.persistent.ActiveOrderDescriptorView
 
 import scala.annotation.tailrec
 import scala.collection.mutable.ListBuffer
 import scala.language.higherKinds
+import scala.math.BigDecimal.RoundingMode
 
 class Algo[F[_]: Applicative: Monad](
     val liveOrdersRepo: LiveOrdersRepoAlgebra[F],
@@ -35,9 +37,12 @@ class Algo[F[_]: Applicative: Monad](
       c       <- portfolioRepo.get(underlyingSymbol)
       d <- Monad[F].pure {
         val totalResidual = order.getQuantityL
-        val position      = if (order.getBuySell == BuySell.BUY) Long.MaxValue else c.position
+        val position      = if (order.getBuySell == BuySell.BUY) Long.MaxValue else roundQtyByLotSize(c.position)
         logInfo(
-          s"Algo 2a. Total residual: $totalResidual, live orders: $liveQty, portfolio: $position"
+          s"""Algo 2a. Total residual: $totalResidual, live orders: $liveQty, portfolio: ${if (
+            position == Long.MaxValue
+          ) "INFINITY"
+          else position.toString}"""
         )
         if (a.isEmpty) {
           logInfo(
@@ -52,7 +57,7 @@ class Algo[F[_]: Applicative: Monad](
             a.map(createCancelOrder) :+ createInsertOrder(
               totalResidual,
               position,
-              liveQty,
+              0L, // because live orders are cancelled
               order.getPrice,
               order.getBuySell
             ) // cancels are first
@@ -78,16 +83,18 @@ class Algo[F[_]: Applicative: Monad](
       }
     } yield d
 
-  def roundDownQty(action: OrderAction, lotSize: Int): OrderAction =
+  def roundQtyByLotSize(qty: Long): Long =
+    BigDecimal(qty).setScale(Math.log10(lotSize).toInt * -1, RoundingMode.HALF_EVEN).toLong
+
+  def roundOrderActionByLotSize(action: OrderAction): OrderAction = {
     action match {
       case InsertOrder(order) =>
-        val rounded = order.getQuantityL / lotSize * lotSize
-        InsertOrder(cloneOrderWithNewQty(order, rounded))
+        InsertOrder(cloneOrderWithNewQty(order, roundQtyByLotSize(order.getQuantityL)))
       case UpdateOrder(a, order) =>
-        val rounded = order.getQuantityL / lotSize * lotSize
-        UpdateOrder(a, cloneOrderWithNewQty(order, rounded))
+        UpdateOrder(a, cloneOrderWithNewQty(order, roundQtyByLotSize(order.getQuantityL)))
       case a @ CancelOrder(_, _) => a
     }
+  }
 
   def removeZeroQty(action: OrderAction): Boolean =
     action match {
@@ -146,24 +153,27 @@ class Algo[F[_]: Applicative: Monad](
     newOrder
   }
 
-  def updateLiveOrders(activeOrderDescriptorView: ActiveOrderDescriptorView, order: Order): F[Unit] =
+  def updateLiveOrders(activeOrderDescriptorView: ActiveOrderDescriptorView, executedOrder: Order): F[Unit] =
     activeOrderDescriptorView.getAction match {
-      case 1 => liveOrdersRepo.putOrder(underlyingSymbol, RepoOrder(activeOrderDescriptorView, order))
-      // Agent 2500. Got executed id: 8xRSYXC, status: Fully executed ActiveOrderDescriptorView[status=Terminated eStatus=Fully executed act=VOID resp=EXEC_FULL eCode=0 error=null avgExecP=18.9 pOnMkt=0.0 qtyOnMkt=0 rQty=0 oCopy=Order[FILLED id=8xRSYXC SELL RBF: 0 @ 18.5 val=DAY cum=400 uid=gqtrader2 ud=enkuo67pe101i md=[0x47009000=NORMAL 0x3510006=PRINCIPAL 0x47000027=51000143 0x3510003=C924 0x3510004=0024_CU21_PG 0x351000a=false 0x47000011=PRINCIPAL 0x47000031=gqtrader2 0x47000036=V 0x40000102=true 0x3510005=9901150 0x47000079=JV 0x3510002=0024 0x40000101=gqtrader2 0x21200009=true 0x44020005=mrt 0x21010003=400.0 0x47009100=NONE 0x47000033=C924 0x3510101=0024_CU21@ 0x47000034=1634048377802 0x3510007=false 0x47000035=G950 0x47000029=9901150 0x47000028=1634048377802 0x3510008=false 0x3510001=G950 0x1012f=gqtrader2 0x47000001=DEALER 0x1006a=1634048377417 0x40000000=9901150 0x44020001=668c56d3:17c727e57b2:-7f99:5:Agent 0x10600001=long 0x44020002=668c56d3:17c727e57b2:-7f99 0x2101001=400 0x3510100=false 0x40000100=DEFAULT 0x10600003=false 0x351000c=TRANSPARENT 0x10003=gqtrader2 0x351000d=false 0x44020004=0e1783b4-4c99-4a6f-9786-a1d1082eeb79 0x47000010=CASH 0x10064=SET-TRX 0xe=f6c03010-9c98-4d68-8d3f-8498213319c6 0x1012e=ON-1-1634048377859-1 0x100ca=8xRSYXC 0x3510009=false 0x47000030=gqtrader2]]]
-      case 2 if activeOrderDescriptorView.getExecutionStatus.toLowerCase.contains("fully executed") =>
-        liveOrdersRepo.removeOrder(underlyingSymbol, order.getId)
-      case 2 => liveOrdersRepo.putOrder(underlyingSymbol, RepoOrder(activeOrderDescriptorView, order))
-      case 3 => liveOrdersRepo.removeOrder(underlyingSymbol, order.getId)
-      case _ => ().pure[F]
+      case 3 => liveOrdersRepo.removeOrder(underlyingSymbol, executedOrder.getId)
+      case _ =>
+        if (activeOrderDescriptorView.getMarketStatus == "Terminated") {
+          liveOrdersRepo.removeOrder(underlyingSymbol, executedOrder.getId)
+        } else {
+          liveOrdersRepo.putOrder(underlyingSymbol, RepoOrder(activeOrderDescriptorView, executedOrder))
+        }
     }
 
   def process(preProcess: EitherT[F, Error, Order]): F[List[OrderAction]] =
     (for {
-      b <- preProcess
+      a <- preProcess
+      b <- EitherT.rightT[F, Error](cloneModifyOrder(a, roundQtyByLotSize(a.getQuantityL), a.getPrice, a.getBuySell))
+      _ = logInfo(s"Algo 0. Start algo. Order with qty rounded: ${b.getQuantityL}")
+
       c <- EitherT.right[Error](createOrderActions(b))
       _ = logInfo(s"Algo 4. Calculation result: $c")
-      d <- EitherT.right[Error](c.map(p => roundDownQty(p, lotSize).pure[F]).sequence)
-      _ = logInfo(s"Algo 5. Qty rounded down: $d")
+      d <- EitherT.right[Error](c.map(roundOrderActionByLotSize(_).pure[F]).sequence)
+      _ = logInfo(s"Algo 5. Qty after rounding: $d")
       e <- EitherT.rightT[F, Error](d.filter(removeZeroQty))
       _ = logInfo(s"Algo 6. Removed zero qty: $e")
     } yield e).value.map {
@@ -193,6 +203,11 @@ class Algo[F[_]: Applicative: Monad](
   private def isPendingError(a: Boolean): Either[Error, Unit] = Either.cond(a, (), Error.PendingError)
   // CALLED WHEN SIGNAL
 
+  def handleOnPortfolio(qty: Long): F[Unit] =
+    for {
+      _ <- portfolioRepo.put(underlyingSymbol, Portfolio(underlyingSymbol, qty))
+    } yield ()
+
   // called everytime ul price changes
   def handleOnSignal(preProcess: EitherT[F, Error, Order]): F[Either[Error, Unit]] =
     (for {
@@ -207,15 +222,30 @@ class Algo[F[_]: Applicative: Monad](
         Left(e)
     }
 
+  def convertToOrder(a: ActiveOrderDescriptorView, sentOrder: Order, underlyingOrderCustomId: CustomId): Order = {
+    val newOrder = new Order()
+    newOrder.setId(sentOrder.getId)
+    newOrder.setPrice(sentOrder.getPrice)
+    newOrder.setQuantity(a.getRQtyL) // remaining quantity
+    newOrder.setBuySell(sentOrder.getBuySell)
+    newOrder.setCustomField(CustomId.field, underlyingOrderCustomId.v)
+    newOrder
+  }
+
   def handleOnOrderAck(
       activeOrderDescriptorView: ActiveOrderDescriptorView,
       preProcess: EitherT[F, Error, Order]
   ): EitherT[F, Error, Unit] =
     for {
-      a <- EitherT.rightT[F, Error](activeOrderDescriptorView.getOrderCopy)
-      customId = CustomId.fromOrder(a)
-      _        = logInfo(s"Agent 100. Start handling ack Id: ${a.getId} CustomId: $customId")
-      _ <- EitherT.right[Error](updateLiveOrders(activeOrderDescriptorView, a))
+      sentOrder <- EitherT.rightT[F, Error](activeOrderDescriptorView.getOrderCopy)
+      _ = logAlert(s"Execution Status ${activeOrderDescriptorView.getExecutionStatus}")
+      _ = logAlert(s"Market Status ${activeOrderDescriptorView.getMarketStatus}")
+      _ = logAlert(s"Action ${activeOrderDescriptorView.getAction}")
+
+      customId = CustomId.fromOrder(sentOrder)
+      executedOrder <- EitherT.rightT[F, Error](convertToOrder(activeOrderDescriptorView, sentOrder, customId))
+      _ = logInfo(s"Agent 100. Start handling ack Id: ${sentOrder.getId} CustomId: $customId")
+      _ <- EitherT.right[Error](updateLiveOrders(activeOrderDescriptorView, executedOrder))
       _ <- EitherT.right[Error](pendingOrdersRepo.remove(customId))
       d <- EitherT.right[Error](pendingCalculationRepo.shouldRecalculate)
       _ <- EitherT.right[Error](pendingCalculationRepo.deactivate())
@@ -231,38 +261,38 @@ class Algo[F[_]: Applicative: Monad](
       _ <- EitherT.right[Error](pendingOrdersRepo.remove(customId))
       _ <- EitherT.right[Error](pendingCalculationRepo.deactivate())
     } yield ()
+
+  def handleOnUlProjectedPrice(): EitherT[F, Error, Unit] =
+    for {
+      a <- EitherT.right[Error](liveOrdersRepo.getOrdersByTimeSortedDown(underlyingSymbol))
+      b <- EitherT.rightT[F, Error](a.map(p => CancelOrder(p.orderView, p.order)))
+      _ <- EitherT.right[Error](b.map(p => sendOrder(p).pure[F]).sequence)
+      _ <- EitherT.right[Error](b.map(pendingOrdersRepo.put).sequence)
+      _ <- EitherT.rightT[F, Error](pendingCalculationRepo.activate())
+    } yield ()
 }
 
 object Algo {
   def apply[F[_]: Applicative: Monad](
       underlyingSymbol: String,
       lotSize: Int,
-      portfolioQty: Long,
       sendOrder: OrderAction => Order,
       logAlert: String => Unit,
       logInfo: String => Unit,
       logError: String => Unit
-  ): F[Algo[F]] = {
-    val liveOrdersRepo         = new LiveOrdersInMemInterpreter[F]
-    val portfolioRepo          = new UnderlyingPortfolioInterpreter[F]
-    val pendingOrdersRepo      = new PendingOrdersInMemInterpreter[F]
-    val pendingCalculationRepo = new PendingCalculationInMemInterpreter[F]
-    for {
-      _ <- portfolioRepo.put(underlyingSymbol, Portfolio(underlyingSymbol, portfolioQty))
-      b = new Algo(
-        liveOrdersRepo,
-        portfolioRepo,
-        pendingOrdersRepo,
-        pendingCalculationRepo,
-        underlyingSymbol,
-        lotSize,
-        sendOrder,
-        logAlert,
-        logInfo,
-        logError
-      )
-    } yield b
-  }
+  ): Algo[F] =
+    new Algo(
+      liveOrdersRepo = new LiveOrdersInMemInterpreter[F],
+      portfolioRepo = new UnderlyingPortfolioInterpreter[F],
+      pendingOrdersRepo = new PendingOrdersInMemInterpreter[F],
+      pendingCalculationRepo = new PendingCalculationInMemInterpreter[F],
+      underlyingSymbol = underlyingSymbol,
+      lotSize = lotSize,
+      sendOrder = sendOrder,
+      logAlert = logAlert,
+      logInfo = logInfo,
+      logError = logError
+    )
 
   def cloneOrderWithNewQty(order: Order, newQty: Long): Order = {
     val o = new Order()
@@ -311,5 +341,95 @@ object Algo {
       )
     val x = c.filter(p => refPrice >= p._1).last
     if (refPrice == x._1 && !isUp) x._2 else x._3
+  }
+
+  case class MyScenarioStatus(priceOnMarket: Double, qtyOnMarketL: Long)
+
+  case class DW(
+      uniqueId: String,
+      projectedPrice: Option[Double] = None,
+      projectedVol: Option[Long] = None,
+      delta: Option[Double] = None,
+      putCall: Option[PutCall] = None,
+      marketSells: Seq[MyScenarioStatus] = Seq.empty,
+      marketBuys: Seq[MyScenarioStatus] = Seq.empty,
+      ownSellStatusesDefault: Seq[MyScenarioStatus] = Seq.empty,
+      ownBuyStatusesDefault: Seq[MyScenarioStatus] = Seq.empty,
+      ownSellStatusesDynamic: Seq[MyScenarioStatus] = Seq.empty,
+      ownBuyStatusesDynamic: Seq[MyScenarioStatus] = Seq.empty
+  )
+
+  def predictResidual(
+      marketBuys: Seq[MyScenarioStatus],
+      marketSells: Seq[MyScenarioStatus],
+      ownBuyStatusesDefault: Seq[MyScenarioStatus],
+      ownSellStatusesDefault: Seq[MyScenarioStatus],
+      ownBuyStatusesDynamic: Seq[MyScenarioStatus],
+      ownSellStatusesDynamic: Seq[MyScenarioStatus],
+      dwMarketProjectedPrice: Double,
+      dwMarketProjectedQty: Long,
+      signedDelta: Double
+  ): Long = {
+    val bdOwnBestBidDefault = BigDecimal(
+      ownBuyStatusesDefault.sortWith(_.priceOnMarket < _.priceOnMarket).lastOption.map(_.priceOnMarket).getOrElse(0.0)
+    ).setScale(2, RoundingMode.HALF_EVEN)
+    val bdOwnBestAskDefault = BigDecimal(
+      ownSellStatusesDefault
+        .sortWith(_.priceOnMarket < _.priceOnMarket)
+        .headOption
+        .map(_.priceOnMarket)
+        .getOrElse(Int.MaxValue.toDouble)
+    ).setScale(2, RoundingMode.HALF_EVEN)
+    val bdOwnBestBidDynamic = BigDecimal(
+      ownBuyStatusesDynamic.sortWith(_.priceOnMarket < _.priceOnMarket).lastOption.map(_.priceOnMarket).getOrElse(0.0)
+    ).setScale(2, RoundingMode.HALF_EVEN)
+    val bdOwnBestAskDynamic = BigDecimal(
+      ownSellStatusesDynamic
+        .sortWith(_.priceOnMarket < _.priceOnMarket)
+        .headOption
+        .map(_.priceOnMarket)
+        .getOrElse(Int.MaxValue.toDouble)
+    ).setScale(2, RoundingMode.HALF_EVEN)
+    val qty: Long = {
+      val bdOwnBestBid =
+        if (bdOwnBestBidDefault <= bdOwnBestBidDynamic) bdOwnBestBidDynamic else bdOwnBestBidDefault
+      val bdOwnBestAsk =
+        if (bdOwnBestAskDefault <= bdOwnBestAskDynamic) bdOwnBestAskDefault else bdOwnBestAskDynamic
+      val sumMktVolBid = marketBuys
+        .filter(p => {
+          p.priceOnMarket > bdOwnBestBid || p.priceOnMarket == 0.0
+        })
+        .map(_.qtyOnMarketL)
+        .sum
+      val sumMktVolAsk = marketSells
+        .filter(p => {
+          p.priceOnMarket < bdOwnBestAsk || p.priceOnMarket == 0.0
+        })
+        .map(_.qtyOnMarketL)
+        .sum
+      /*
+       if (bdOwnBestBid >= dwMarketProjectedPrice) { //Mathed Buy
+  dwMarketProjectedQty - sumMktVolBid
+ } else if (bdOwnBestAsk <= dwMarketProjectedPrice) { //Matched Sell
+            dwMarketProjectedQty - sumMktVolAsk
+ } else {
+          0
+       }
+       */
+      if (bdOwnBestBid >= dwMarketProjectedPrice) { //Matched Buy
+        (dwMarketProjectedQty - sumMktVolBid) * -1
+      } else if (bdOwnBestAsk <= dwMarketProjectedPrice) { //Matched Sell
+        dwMarketProjectedQty - sumMktVolAsk
+      } else {
+        0
+      }
+    }
+    // CALL dw buy, order is positive , delta is positive, buy dw-> sell ul
+    // PUT dw, buy, order is positive, delta is negative, buy dw -> buy ul
+    // CALL dw sell, order is negative, delta is positive, sell dw -> buy ul
+    // PUT dw sell, order is negative, delta is negative, sell dw -> sell ul
+    BigDecimal(qty * signedDelta)
+      .setScale(0, RoundingMode.HALF_EVEN)
+      .toLong // positive = buy ul, negative = sell ul
   }
 }

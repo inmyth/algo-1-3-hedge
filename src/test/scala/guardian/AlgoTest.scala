@@ -5,7 +5,9 @@ import cats.implicits._
 import cats.{Id, Monad}
 import com.ingalys.imc.BuySell
 import com.ingalys.imc.order.Order
+import guardian.Algo.{DW, MyScenarioStatus}
 import guardian.Entities.OrderAction.{CancelOrder, InsertOrder, UpdateOrder}
+import guardian.Entities.PutCall.CALL
 import guardian.Entities.{CustomId, OrderAction, Portfolio, RepoOrder}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers.convertToAnyShouldWrapper
@@ -15,6 +17,7 @@ import org.scalatest.wordspec.AnyWordSpec
 
 import scala.collection.mutable.ListBuffer
 import scala.language.{higherKinds, postfixOps}
+import scala.math.BigDecimal.RoundingMode
 
 class AlgoTest extends AnyWordSpec with Matchers {
 
@@ -202,12 +205,12 @@ class AlgoTest extends AnyWordSpec with Matchers {
       }
     }
     "order does not have rounded quantity" should {
-      "get the quantity rounded down to lot size" in {
+      "get the quantity rounded to lot size" in {
         val process = baseProcess(List.empty, portfolioQty)
         val qty     = 6323
         val order   = createTestOrder("someid", 10L, qty, ulPrice, BuySell.SELL, CustomId.generate)
         val x       = process(order)
-        x.head.asInstanceOf[InsertOrder].order.getQuantityL % lotSize shouldBe 0
+        x.head.asInstanceOf[InsertOrder].order.getQuantityL shouldBe 6300
       }
     }
     "calculated quantity is zero" should {
@@ -271,4 +274,22 @@ class AlgoTest extends AnyWordSpec with Matchers {
       Algo.getPriceAfterTicks(false, BigDecimal(99.50), 5) shouldBe 98.25
     }
   }
+//  "predictResidual" when {
+//    "dwProjPx matches on Buy" should {
+//      "return sell order" in {
+//        Algo
+//          .predictResidual(
+//            marketBuys = dw.marketBuys,
+//            marketSells = dw.marketSells,
+//            ownBuyStatusesDefault = dw.ownBuyStatusesDefault,
+//            ownSellStatusesDefault = dw.ownSellStatusesDefault,
+//            ownBuyStatusesDynamic = dw.ownBuyStatusesDynamic,
+//            ownSellStatusesDynamic = dw.ownSellStatusesDynamic,
+//            dwMarketProjectedPrice = dw.projectedPrice.get,
+//            dwMarketProjectedQty = dw.projectedVol.get,
+//            signedDelta = dw.delta.get
+//          ) shouldBe -668L
+//      }
+//    }
+//  }
 }
