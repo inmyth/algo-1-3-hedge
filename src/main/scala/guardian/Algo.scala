@@ -29,11 +29,9 @@ class Algo[F[_]: Applicative: Monad](
     logInfo: String => Unit,
     logError: String => Unit
 ) {
-  def createOrderActions(order: Order): F[List[OrderAction]] =
+  def createOrderActions(order: Order, liveOrders: List[RepoOrder]): F[List[OrderAction]] =
     for {
-      a <- liveOrdersRepo.getOrdersByTimeSortedDown(underlyingSymbol)
-      _ = logInfo(s"Algo 1. Live orders: $a")
-      liveQty <- Monad[F].pure(calcTotalQty(a.map(_.order)))
+      liveQty <- Monad[F].pure(calcTotalQty(liveOrders.map(_.order)))
       c       <- portfolioRepo.get(underlyingSymbol)
       d <- Monad[F].pure {
         val totalResidual = order.getQuantityL
@@ -44,17 +42,17 @@ class Algo[F[_]: Applicative: Monad](
           ) "INFINITY"
           else position.toString}"""
         )
-        if (a.isEmpty) {
+        if (liveOrders.isEmpty) {
           logInfo(
             s"Algo 2b. Live order is empty. Will create a new insert with qty: ${order.getQuantityL}"
           )
           List(createInsertOrder(totalResidual, position, liveQty, order.getPrice, order.getBuySell))
         } else {
-          if (order.getBuySell != a.head.order.getBuySell) {
+          if (order.getBuySell != liveOrders.head.order.getBuySell) {
             logInfo(
-              s"Algo 2b. Direction changed from ${a.head.order.getBuySell} to ${order.getBuySell}. Cancel all live orders and create a new insert with qty: ${order.getQuantityL}"
+              s"Algo 2b. Direction changed from ${liveOrders.head.order.getBuySell} to ${order.getBuySell}. Cancel all live orders and create a new insert with qty: ${order.getQuantityL}"
             )
-            a.map(createCancelOrder) :+ createInsertOrder(
+            liveOrders.map(createCancelOrder) :+ createInsertOrder(
               totalResidual,
               position,
               0L, // because live orders are cancelled
@@ -66,7 +64,7 @@ class Algo[F[_]: Applicative: Monad](
               logInfo(
                 s"Algo 2b. Calculated qty is smaller than live orders. Will update or cancel."
               )
-              trimLiveOrders(a, order.getQuantityL, ListBuffer.empty)
+              trimLiveOrders(liveOrders, order.getQuantityL, ListBuffer.empty)
             } else if (totalResidual == liveQty) {
               logInfo(
                 s"Algo 2b. Calculated qty is the same as live orders. Will do nothing."
@@ -164,22 +162,50 @@ class Algo[F[_]: Applicative: Monad](
         }
     }
 
+  def updatePrice(price: Double, liveOrders: List[RepoOrder], orderActions: List[OrderAction]): List[OrderAction] = {
+    val dbPrice = BigDecimal(price).setScale(2, RoundingMode.HALF_EVEN)
+    val x: (List[Option[String]], List[OrderAction]) = orderActions.map {
+      case a @ InsertOrder(order) =>
+        (None, InsertOrder(cloneModifyOrder(order, order.getQuantityL, price, order.getBuySell)))
+      case a @ UpdateOrder(activeOrderDescriptorView, order) =>
+        (
+          Some(order.getId),
+          UpdateOrder(activeOrderDescriptorView, cloneModifyOrder(order, order.getQuantityL, price, order.getBuySell))
+        )
+      case a @ CancelOrder(_, order) =>
+        (Some(order.getId), a)
+    }.unzip
+    val idList  = x._1
+    val actions = x._2
+    val restLives = liveOrders
+      .filterNot(p => idList.contains(Some(p.order.getId)))
+      .map(p => {
+        if (BigDecimal(p.order.getPrice).setScale(2, RoundingMode.HALF_EVEN) == dbPrice)
+          None
+        else
+          Some(UpdateOrder(p.orderView, cloneModifyOrder(p.order, p.order.getQuantityL, price, p.order.getBuySell)))
+      })
+      .filter(_.isDefined)
+      .map(_.get)
+    actions ++ restLives
+  }
+
   def process(preProcess: EitherT[F, Error, Order]): F[List[OrderAction]] =
     (for {
       a <- preProcess
       b <- EitherT.rightT[F, Error](cloneModifyOrder(a, roundQtyByLotSize(a.getQuantityL), a.getPrice, a.getBuySell))
       _ = logInfo(s"Algo 0. Start algo. Order with qty rounded: ${b.getQuantityL}")
-
-      c <- EitherT.right[Error](createOrderActions(b))
-      _ = logInfo(s"Algo 4. Calculation result: $c")
-      d <- EitherT.right[Error](c.map(roundOrderActionByLotSize(_).pure[F]).sequence)
-      _ = logInfo(s"Algo 5. Qty after rounding: $d")
-      e <- EitherT.rightT[F, Error](d.filter(removeZeroQty))
-      _ = logInfo(s"Algo 6. Removed zero qty: $e")
-    } yield e).value.map {
+      c <- EitherT.right(liveOrdersRepo.getOrdersByTimeSortedDown(underlyingSymbol))
+      _ = logInfo(s"Algo 1. Live orders: $c")
+      d <- EitherT.right[Error](createOrderActions(b, c))
+      e <- EitherT.rightT[F, Error](updatePrice(a.getPrice, c, d))
+      f <- EitherT.right[Error](e.map(roundOrderActionByLotSize(_).pure[F]).sequence)
+      g <- EitherT.rightT[F, Error](f.filter(removeZeroQty))
+      _ = logInfo(s"Algo 3. Algo result after price updated and rounding: $g")
+    } yield g).value.map {
       case Right(v) => v
       case Left(e) =>
-        logAlert(s"Algo 6e: ${e.msg}")
+        logAlert(s"Algo 3e: ${e.msg}")
         List.empty[OrderAction]
     }
 
@@ -201,7 +227,6 @@ class Algo[F[_]: Applicative: Monad](
     } yield b
 
   private def isPendingError(a: Boolean): Either[Error, Unit] = Either.cond(a, (), Error.PendingError)
-  // CALLED WHEN SIGNAL
 
   def handleOnPortfolio(qty: Long): F[Unit] =
     for {
@@ -260,15 +285,6 @@ class Algo[F[_]: Applicative: Monad](
       _ <- EitherT.rightT[F, Error](logAlert(errorMsg))
       _ <- EitherT.right[Error](pendingOrdersRepo.remove(customId))
       _ <- EitherT.right[Error](pendingCalculationRepo.deactivate())
-    } yield ()
-
-  def handleOnUlProjectedPrice(): EitherT[F, Error, Unit] =
-    for {
-      a <- EitherT.right[Error](liveOrdersRepo.getOrdersByTimeSortedDown(underlyingSymbol))
-      b <- EitherT.rightT[F, Error](a.map(p => CancelOrder(p.orderView, p.order)))
-      _ <- EitherT.right[Error](b.map(p => sendOrder(p).pure[F]).sequence)
-      _ <- EitherT.right[Error](b.map(pendingOrdersRepo.put).sequence)
-      _ <- EitherT.rightT[F, Error](pendingCalculationRepo.activate())
     } yield ()
 }
 
@@ -407,15 +423,6 @@ object Algo {
         })
         .map(_.qtyOnMarketL)
         .sum
-      /*
-       if (bdOwnBestBid >= dwMarketProjectedPrice) { //Mathed Buy
-  dwMarketProjectedQty - sumMktVolBid
- } else if (bdOwnBestAsk <= dwMarketProjectedPrice) { //Matched Sell
-            dwMarketProjectedQty - sumMktVolAsk
- } else {
-          0
-       }
-       */
       if (bdOwnBestBid >= dwMarketProjectedPrice) { //Matched Buy
         (dwMarketProjectedQty - sumMktVolBid) * -1
       } else if (bdOwnBestAsk <= dwMarketProjectedPrice) { //Matched Sell
