@@ -8,7 +8,7 @@ import com.ingalys.imc.BuySell
 import com.ingalys.imc.order.Order
 import guardian.Algo._
 import guardian.Entities.OrderAction.{CancelOrder, InsertOrder, UpdateOrder}
-import guardian.Entities.{CustomId, OrderAction, Portfolio, PutCall, RepoOrder}
+import guardian.Entities.{CustomId, OrderAction, Portfolio, PutCall, RepoOrder, SendingUrgency}
 import guardian.Error.UnknownError
 import horizontrader.services.collectors.persistent.ActiveOrderDescriptorView
 
@@ -46,35 +46,54 @@ class Algo[F[_]: Applicative: Monad](
           logInfo(
             s"Algo 2b. Live order is empty. Will create a new insert with qty: ${order.getQuantityL}"
           )
-          List(createInsertOrder(totalResidual, position, liveQty, order.getPrice, order.getBuySell))
+          List(
+            createInsertOrder(
+              totalResidual,
+              position,
+              liveQty,
+              order.getPrice,
+              order.getBuySell,
+              SendingUrgency.Immediate
+            )
+          )
         } else {
           if (order.getBuySell != liveOrders.head.order.getBuySell) {
             logInfo(
-              s"Algo 2b. Direction changed from ${liveOrders.head.order.getBuySell} to ${order.getBuySell}. Cancel all live orders and create a new insert with qty: ${order.getQuantityL}"
+              s"Algo 2c. Direction changed from ${liveOrders.head.order.getBuySell} to ${order.getBuySell}. Cancel all live orders and create a new insert with qty: ${order.getQuantityL}"
             )
             liveOrders.map(createCancelOrder) :+ createInsertOrder(
               totalResidual,
               position,
               0L, // because live orders are cancelled
               order.getPrice,
-              order.getBuySell
+              order.getBuySell,
+              SendingUrgency.Later
             ) // cancels are first
           } else {
             if (totalResidual < liveQty) {
               logInfo(
-                s"Algo 2b. Calculated qty is smaller than live orders. Will update or cancel."
+                s"Algo 2d. Calculated qty is smaller than live orders. Will update or cancel."
               )
               trimLiveOrders(liveOrders, order.getQuantityL, ListBuffer.empty)
             } else if (totalResidual == liveQty) {
               logInfo(
-                s"Algo 2b. Calculated qty is the same as live orders. Will do nothing."
+                s"Algo 2e. Calculated qty is the same as live orders. Will do nothing."
               )
               List.empty[OrderAction]
             } else {
               logInfo(
-                s"Algo 2b. Calculated qty is larger than live orders. Will create a new order."
+                s"Algo 2f. Calculated qty is larger than live orders. Will create a new order."
               )
-              List(createInsertOrder(totalResidual, position, liveQty, order.getPrice, order.getBuySell))
+              List(
+                createInsertOrder(
+                  totalResidual,
+                  position,
+                  liveQty,
+                  order.getPrice,
+                  order.getBuySell,
+                  SendingUrgency.Immediate
+                )
+              )
             }
           }
         }
@@ -86,8 +105,8 @@ class Algo[F[_]: Applicative: Monad](
 
   def roundOrderActionByLotSize(action: OrderAction): OrderAction = {
     action match {
-      case InsertOrder(order) =>
-        InsertOrder(cloneOrderWithNewQty(order, roundQtyByLotSize(order.getQuantityL)))
+      case InsertOrder(order, urgency) =>
+        InsertOrder(cloneOrderWithNewQty(order, roundQtyByLotSize(order.getQuantityL)), urgency)
       case UpdateOrder(a, order) =>
         UpdateOrder(a, cloneOrderWithNewQty(order, roundQtyByLotSize(order.getQuantityL)))
       case a @ CancelOrder(_, _) => a
@@ -96,7 +115,7 @@ class Algo[F[_]: Applicative: Monad](
 
   def removeZeroQty(action: OrderAction): Boolean =
     action match {
-      case InsertOrder(order)    => order.getQuantityL != 0L
+      case InsertOrder(order, _) => order.getQuantityL != 0L
       case UpdateOrder(_, order) => order.getQuantityL != 0L
       case CancelOrder(_, _)     => true
     }
@@ -110,7 +129,8 @@ class Algo[F[_]: Applicative: Monad](
       position: Long,
       liveQty: Long,
       price: Double,
-      buySell: Int
+      buySell: Int,
+      sendingUrgency: SendingUrgency
   ): OrderAction = {
     val o = new Order()
     o.setPrice(price)
@@ -118,7 +138,7 @@ class Algo[F[_]: Applicative: Monad](
     o.setCustomField(CustomId.field, CustomId.generate.v)
     val qty = if (totalResidual >= position) position - liveQty else totalResidual - liveQty
     o.setQuantity(qty)
-    InsertOrder(o)
+    InsertOrder(o, sendingUrgency)
   }
 
   @tailrec
@@ -165,9 +185,9 @@ class Algo[F[_]: Applicative: Monad](
   def updatePrice(price: Double, liveOrders: List[RepoOrder], orderActions: List[OrderAction]): List[OrderAction] = {
     val dbPrice = BigDecimal(price).setScale(2, RoundingMode.HALF_EVEN)
     val x: (List[Option[String]], List[OrderAction]) = orderActions.map {
-      case a @ InsertOrder(order) =>
-        (None, InsertOrder(cloneModifyOrder(order, order.getQuantityL, price, order.getBuySell)))
-      case a @ UpdateOrder(activeOrderDescriptorView, order) =>
+      case InsertOrder(order, urgency) =>
+        (None, InsertOrder(cloneModifyOrder(order, order.getQuantityL, price, order.getBuySell), urgency))
+      case UpdateOrder(activeOrderDescriptorView, order) =>
         (
           Some(order.getId),
           UpdateOrder(activeOrderDescriptorView, cloneModifyOrder(order, order.getQuantityL, price, order.getBuySell))
@@ -211,7 +231,7 @@ class Algo[F[_]: Applicative: Monad](
 
   def getPendingOrderAction(customId: CustomId): EitherT[F, Error, OrderAction] =
     for {
-      a <- EitherT.liftF[F, Error, Option[OrderAction]](pendingOrdersRepo.get(customId))
+      a <- EitherT.liftF[F, Error, Option[OrderAction]](pendingOrdersRepo.getImmediate(customId))
       b <- EitherT.fromEither[F](
         a.fold[Either[Error, OrderAction]](Left(UnknownError(s"Pending order not found, custom id:${customId.v}")))(p =>
           Right(p)
@@ -221,12 +241,13 @@ class Algo[F[_]: Applicative: Monad](
 
   def checkAndUpdatePendingOrderAndCalculation(): EitherT[F, Error, Unit] =
     for {
-      a <- EitherT.right[Error](pendingOrdersRepo.isEmpty)
-      _ <- EitherT.right[Error](if (a) pendingCalculationRepo.activate() else Applicative[F].pure(()))
-      b <- EitherT.fromEither[F](isPendingError(a))
-    } yield b
+      a <- EitherT.right[Error](pendingOrdersRepo.isImmediateEmpty)
+      b <- EitherT.right[Error](pendingOrdersRepo.isLaterEmpty)
+      _ <- EitherT.right[Error](if (a && b) pendingCalculationRepo.activate() else Applicative.pure[F])
+      c <- EitherT.fromEither[F](isPendingEmptyOrError(a && b))
+    } yield c
 
-  private def isPendingError(a: Boolean): Either[Error, Unit] = Either.cond(a, (), Error.PendingError)
+  private def isPendingEmptyOrError(a: Boolean): Either[Error, Unit] = Either.cond(a, (), Error.PendingError)
 
   def handleOnPortfolio(qty: Long): F[Unit] =
     for {
@@ -238,8 +259,20 @@ class Algo[F[_]: Applicative: Monad](
     (for {
       _ <- checkAndUpdatePendingOrderAndCalculation()
       a <- EitherT.right[Error](process(preProcess))
-      _ <- EitherT.right[Error](a.map(p => sendOrder(p).pure[F]).sequence)
-      _ <- EitherT.right[Error](a.map(pendingOrdersRepo.put).sequence)
+      _ <- EitherT.right[Error](a.map {
+        case l @ InsertOrder(_, urgency) =>
+          urgency match {
+            case SendingUrgency.Immediate => pendingOrdersRepo.putImmediate(l)
+            case SendingUrgency.Later     => pendingOrdersRepo.putLater(l)
+          }
+        case l @ UpdateOrder(_, _) => pendingOrdersRepo.putImmediate(l)
+        case l @ CancelOrder(_, _) => pendingOrdersRepo.putImmediate(l)
+      }.sequence)
+      _ <- EitherT.right[Error](
+        a.filterNot(p => p.isInstanceOf[InsertOrder] && p.asInstanceOf[InsertOrder].urgency == SendingUrgency.Later)
+          .map(p => sendOrder(p).pure[F])
+          .sequence
+      )
     } yield ()).value.map {
       case Right(_) => Right(())
       case Left(e) =>
@@ -263,15 +296,32 @@ class Algo[F[_]: Applicative: Monad](
   ): EitherT[F, Error, Unit] =
     for {
       sentOrder <- EitherT.rightT[F, Error](activeOrderDescriptorView.getOrderCopy)
-      _ = logAlert(s"Execution Status ${activeOrderDescriptorView.getExecutionStatus}")
-      _ = logAlert(s"Market Status ${activeOrderDescriptorView.getMarketStatus}")
-      _ = logAlert(s"Action ${activeOrderDescriptorView.getAction}")
-
       customId = CustomId.fromOrder(sentOrder)
       executedOrder <- EitherT.rightT[F, Error](convertToOrder(activeOrderDescriptorView, sentOrder, customId))
       _ = logInfo(s"Agent 100. Start handling ack Id: ${sentOrder.getId} CustomId: $customId")
-      _ <- EitherT.right[Error](updateLiveOrders(activeOrderDescriptorView, executedOrder))
-      _ <- EitherT.right[Error](pendingOrdersRepo.remove(customId))
+      _                <- EitherT.right[Error](updateLiveOrders(activeOrderDescriptorView, executedOrder))
+      _                <- EitherT.right[Error](pendingOrdersRepo.removeImmediate(customId))
+      isImmediateEmpty <- EitherT.right[Error](pendingOrdersRepo.isImmediateEmpty)
+      isLaterEmpty     <- EitherT.right[Error](pendingOrdersRepo.isLaterEmpty)
+      _ <- (isImmediateEmpty, isLaterEmpty) match {
+        case (true, true)   => processSignal(preProcess)
+        case (true, false)  => processPendingLater()
+        case (false, true)  => EitherT.rightT[F, Error](())
+        case (false, false) => EitherT.rightT[F, Error](())
+      }
+    } yield ()
+
+  def processPendingLater(): EitherT[F, Error, Unit] =
+    for {
+      a <- EitherT.right[Error](pendingOrdersRepo.getLater)
+      b <- EitherT.rightT[F, Error](OrderAction.InsertOrder(a.order, SendingUrgency.Immediate))
+      _ <- EitherT.right[Error](pendingOrdersRepo.putImmediate(b))
+      _ <- EitherT.right[Error](pendingOrdersRepo.clearLater())
+      _ <- EitherT.right[Error](sendOrder(b).pure[F])
+    } yield ()
+
+  def processSignal(preProcess: EitherT[F, Error, Order]): EitherT[F, Error, Unit] =
+    for {
       d <- EitherT.right[Error](pendingCalculationRepo.shouldRecalculate)
       _ <- EitherT.right[Error](pendingCalculationRepo.deactivate())
       _ <- if (d) EitherT(handleOnSignal(preProcess)) else EitherT.rightT[F, Error](())
@@ -283,7 +333,8 @@ class Algo[F[_]: Applicative: Monad](
   ): EitherT[F, Error, Unit] =
     for {
       _ <- EitherT.rightT[F, Error](logAlert(errorMsg))
-      _ <- EitherT.right[Error](pendingOrdersRepo.remove(customId))
+      _ <- EitherT.right[Error](pendingOrdersRepo.removeImmediate(customId))
+      _ <- EitherT.right[Error](pendingOrdersRepo.clearLater())
       _ <- EitherT.right[Error](pendingCalculationRepo.deactivate())
     } yield ()
 }

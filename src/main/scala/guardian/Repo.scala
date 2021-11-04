@@ -2,6 +2,7 @@ package guardian
 
 import cats.Applicative
 import com.ingalys.imc.order.Order
+import guardian.Entities.OrderAction.InsertOrder
 import guardian.Entities.{CustomId, OrderAction, Portfolio, RepoOrder}
 import horizontrader.services.collectors.persistent.ActiveOrderDescriptorView
 
@@ -68,37 +69,60 @@ class UnderlyingPortfolioInterpreter[F[_]: Applicative] extends UnderlyingPortfo
 
 abstract class PendingOrdersAlgebra[F[_]] {
 
-  def put(act: OrderAction): F[Unit]
+  def putImmediate(act: OrderAction): F[Unit]
 
-  def get(customId: CustomId): F[Option[OrderAction]]
+  def getImmediate(customId: CustomId): F[Option[OrderAction]]
 
-  def remove(customId: CustomId): F[Unit]
+  def removeImmediate(customId: CustomId): F[Unit]
 
-  def isEmpty: F[Boolean]
+  def isImmediateEmpty: F[Boolean]
+
+  def putLater(act: InsertOrder): F[Unit]
+
+  def isLaterEmpty: F[Boolean]
+
+  def getLater: F[InsertOrder]
+
+  def clearLater(): F[Unit]
 
 }
 
 class PendingOrdersInMemInterpreter[F[_]: Applicative] extends PendingOrdersAlgebra[F] {
-  private var db: Map[String, OrderAction] = Map.empty
+  private var dbImmediate: Map[String, OrderAction] = Map.empty
+  private var dbLater: Option[InsertOrder]          = None
 
-  override def put(act: OrderAction): F[Unit] = {
+  override def putImmediate(act: OrderAction): F[Unit] = {
     act match {
-      case OrderAction.InsertOrder(order)    => db += (CustomId.fromOrder(order).v -> act)
-      case OrderAction.UpdateOrder(_, order) => db += (CustomId.fromOrder(order).v -> act)
-      case OrderAction.CancelOrder(_, order) => db += (CustomId.fromOrder(order).v -> act)
+      case OrderAction.InsertOrder(order, _) => dbImmediate += (CustomId.fromOrder(order).v -> act)
+      case OrderAction.UpdateOrder(_, order) => dbImmediate += (CustomId.fromOrder(order).v -> act)
+      case OrderAction.CancelOrder(_, order) => dbImmediate += (CustomId.fromOrder(order).v -> act)
     }
     Applicative[F].unit
   }
 
-  override def get(customId: CustomId): F[Option[OrderAction]] =
-    Applicative[F].pure(db.get(customId.v))
+  override def getImmediate(customId: CustomId): F[Option[OrderAction]] =
+    Applicative[F].pure(dbImmediate.get(customId.v))
 
-  override def remove(customId: CustomId): F[Unit] = {
-    db -= customId.v
+  override def removeImmediate(customId: CustomId): F[Unit] = {
+    dbImmediate -= customId.v
     Applicative[F].unit
   }
 
-  override def isEmpty: F[Boolean] = Applicative[F].pure(db.isEmpty)
+  override def isImmediateEmpty: F[Boolean] = Applicative[F].pure(dbImmediate.isEmpty)
+
+  override def putLater(act: InsertOrder): F[Unit] = {
+    dbLater = Some(act)
+    Applicative[F].unit
+  }
+
+  override def getLater: F[InsertOrder] = Applicative[F].pure(dbLater.get)
+
+  override def clearLater(): F[Unit] = {
+    dbLater = None
+    Applicative[F].unit
+  }
+
+  override def isLaterEmpty: F[Boolean] = Applicative[F].pure(dbLater.isEmpty)
 }
 
 abstract class PendingCalculationAlgebra[F[_]] {

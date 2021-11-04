@@ -9,9 +9,15 @@ object Entities {
 
   case class Portfolio(symbol: String, position: Long)
 
+  sealed trait SendingUrgency
+  object SendingUrgency {
+    case object Immediate extends SendingUrgency
+    case object Later     extends SendingUrgency
+  }
+
   sealed trait OrderAction
   object OrderAction {
-    case class InsertOrder(order: Order)                                                       extends OrderAction
+    case class InsertOrder(order: Order, urgency: SendingUrgency)                              extends OrderAction
     case class UpdateOrder(activeOrderDescriptorView: ActiveOrderDescriptorView, order: Order) extends OrderAction
     case class CancelOrder(activeOrderDescriptorView: ActiveOrderDescriptorView, order: Order) extends OrderAction
   }

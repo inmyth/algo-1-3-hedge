@@ -8,7 +8,7 @@ import com.ingalys.imc.order.Order
 import guardian.Algo.{DW, MyScenarioStatus}
 import guardian.Entities.OrderAction.{CancelOrder, InsertOrder, UpdateOrder}
 import guardian.Entities.PutCall.CALL
-import guardian.Entities.{CustomId, OrderAction, Portfolio, RepoOrder}
+import guardian.Entities.{CustomId, OrderAction, Portfolio, RepoOrder, SendingUrgency}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers.convertToAnyShouldWrapper
 import guardian.Fixtures.{lastId, _}
@@ -227,7 +227,7 @@ class AlgoTest extends AnyWordSpec with Matchers {
       "pending orders exist" in {
         val x = for {
           a <- createApp[Id]().pure[Id]
-          _ <- a.pendingOrdersRepo.put(InsertOrder(rawOrderBuy))
+          _ <- a.pendingOrdersRepo.putImmediate(InsertOrder(rawOrderBuy, SendingUrgency.Immediate))
           c <- a.handleOnSignal(EitherT.fromEither(rawOrderBuy.asRight[Error]))
         } yield c
         x shouldBe Left(Error.PendingError)
@@ -249,7 +249,7 @@ class AlgoTest extends AnyWordSpec with Matchers {
       "order exists in the pending repo" in {
         val x = for {
           a <- createApp[Id]().pure[Id]
-          _ <- a.pendingOrdersRepo.put(InsertOrder(rawOrderBuy))
+          _ <- a.pendingOrdersRepo.putImmediate(InsertOrder(rawOrderBuy, SendingUrgency.Immediate))
           c = a.handleOnOrderAck(
             createActiveOrderDescriptorView(rawOrderBuy),
             EitherT.fromEither(rawOrderBuy.asRight[Error])
