@@ -435,7 +435,8 @@ object Algo {
       ownSellStatusesDynamic: Seq[MyScenarioStatus],
       dwMarketProjectedPrice: Double,
       dwMarketProjectedQty: Long,
-      signedDelta: Double
+      signedDelta: Double,
+      log: String => Unit
   ): Long = {
     val bdOwnBestBidDefault = BigDecimal(
       ownBuyStatusesDefault.sortWith(_.priceOnMarket < _.priceOnMarket).lastOption.map(_.priceOnMarket).getOrElse(0.0)
