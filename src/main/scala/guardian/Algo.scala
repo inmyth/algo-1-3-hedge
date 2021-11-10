@@ -438,6 +438,55 @@ object Algo {
       signedDelta: Double,
       log: String => Unit
   ): Long = {
+    log(s"Prediction Residual marketBuys $marketBuys")
+    log(s"Prediction Residual marketSells $marketSells")
+    log(s"Prediction Residual ownBuyStatusesDefault $ownBuyStatusesDefault")
+    log(s"Prediction Residual ownSellStatusesDefault $ownSellStatusesDefault")
+    log(s"Prediction Residual ownBuyStatusesDynamic $ownBuyStatusesDynamic")
+    log(s"Prediction Residual ownSellStatusesDynamic $ownSellStatusesDynamic")
+    log(s"Prediction Residual ownSellStatusesDynamic $ownSellStatusesDynamic")
+    log(s"Prediction Residual dwMarketProjectedPrice $dwMarketProjectedPrice")
+    log(s"Prediction Residual dwMarketProjectedQty $dwMarketProjectedQty")
+    log(s"Prediction Residual signedDelta $signedDelta")
+
+    /*
+      case class DW(
+      uniqueId: String,
+      projectedPrice: Option[Double] = None,
+      projectedVol: Option[Long] = None,
+      delta: Option[Double] = None,
+      putCall: Option[PutCall] = None,
+      marketSells: Seq[MyScenarioStatus] = Seq.empty,
+      marketBuys: Seq[MyScenarioStatus] = Seq.empty,
+      ownSellStatusesDefault: Seq[MyScenarioStatus] = Seq.empty,
+      ownBuyStatusesDefault: Seq[MyScenarioStatus] = Seq.empty,
+      ownSellStatusesDynamic: Seq[MyScenarioStatus] = Seq.empty,
+      ownBuyStatusesDynamic: Seq[MyScenarioStatus] = Seq.empty
+  )
+    Agent 2. Dw signed delta list:
+ List(
+ DW(RBF24C2201A@XBKK,
+ Some(0.0),
+ Some(0),
+ Some(0.04901483656659658),
+ Some(CALL),
+
+Vector(
+MyScenarioStatus(0.16,1001900),
+MyScenarioStatus(0.17,1069800),
+MyScenarioStatus(0.18,1058900),
+MyScenarioStatus(0.19,1035400),
+MyScenarioStatus(0.2,1068400)),
+
+Vector(
+MyScenarioStatus(0.13,1079300),
+ MyScenarioStatus(0.12,1011700),
+ MyScenarioStatus(0.11,1000500),
+MyScenarioStatus(0.1,1078600),
+MyScenarioStatus(0.09,1048500)),
+
+List(),List(),List(),List()))
+     */
     val bdOwnBestBidDefault = BigDecimal(
       ownBuyStatusesDefault.sortWith(_.priceOnMarket < _.priceOnMarket).lastOption.map(_.priceOnMarket).getOrElse(0.0)
     ).setScale(2, RoundingMode.HALF_EVEN)
@@ -446,7 +495,7 @@ object Algo {
         .sortWith(_.priceOnMarket < _.priceOnMarket)
         .headOption
         .map(_.priceOnMarket)
-        .getOrElse(Int.MaxValue.toDouble)
+        .getOrElse(Int.MaxValue.toDouble) // 2147483647
     ).setScale(2, RoundingMode.HALF_EVEN)
     val bdOwnBestBidDynamic = BigDecimal(
       ownBuyStatusesDynamic.sortWith(_.priceOnMarket < _.priceOnMarket).lastOption.map(_.priceOnMarket).getOrElse(0.0)
@@ -460,9 +509,9 @@ object Algo {
     ).setScale(2, RoundingMode.HALF_EVEN)
     val qty: Long = {
       val bdOwnBestBid =
-        if (bdOwnBestBidDefault <= bdOwnBestBidDynamic) bdOwnBestBidDynamic else bdOwnBestBidDefault
+        if (bdOwnBestBidDefault <= bdOwnBestBidDynamic) bdOwnBestBidDynamic else bdOwnBestBidDefault //0
       val bdOwnBestAsk =
-        if (bdOwnBestAskDefault <= bdOwnBestAskDynamic) bdOwnBestAskDefault else bdOwnBestAskDynamic
+        if (bdOwnBestAskDefault <= bdOwnBestAskDynamic) bdOwnBestAskDefault else bdOwnBestAskDynamic // max int
       val sumMktVolBid = marketBuys
         .filter(p => {
           p.priceOnMarket > bdOwnBestBid || p.priceOnMarket == 0.0
