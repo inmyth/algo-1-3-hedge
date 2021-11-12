@@ -444,7 +444,7 @@ object Algo {
     log(s"Prediction Residual ownSellStatusesDefault $ownSellStatusesDefault")
     log(s"Prediction Residual ownBuyStatusesDynamic $ownBuyStatusesDynamic")
     log(s"Prediction Residual ownSellStatusesDynamic $ownSellStatusesDynamic")
-    log(s"Prediction Residual ownSellStatusesDynamic $ownSellStatusesDynamic")
+//    log(s"Prediction Residual ownSellStatusesDynamic $ownSellStatusesDynamic")
     log(s"Prediction Residual dwMarketProjectedPrice $dwMarketProjectedPrice")
     log(s"Prediction Residual dwMarketProjectedQty $dwMarketProjectedQty")
     log(s"Prediction Residual signedDelta $signedDelta")
