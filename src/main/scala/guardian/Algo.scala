@@ -450,45 +450,23 @@ object Algo {
     log(s"Prediction Residual signedDelta $signedDelta")
 
     /*
-      case class DW(
-      uniqueId: String,
-      projectedPrice: Option[Double] = None,
-      projectedVol: Option[Long] = None,
-      delta: Option[Double] = None,
-      putCall: Option[PutCall] = None,
-      marketSells: Seq[MyScenarioStatus] = Seq.empty,
-      marketBuys: Seq[MyScenarioStatus] = Seq.empty,
-      ownSellStatusesDefault: Seq[MyScenarioStatus] = Seq.empty,
-      ownBuyStatusesDefault: Seq[MyScenarioStatus] = Seq.empty,
-      ownSellStatusesDynamic: Seq[MyScenarioStatus] = Seq.empty,
-      ownBuyStatusesDynamic: Seq[MyScenarioStatus] = Seq.empty
-  )
-    Agent 2. Dw signed delta list:
- List(
- DW(RBF24C2201A@XBKK,
- Some(0.0),
- Some(0),
- Some(0.04901483656659658),
- Some(CALL),
+Prediction Residual signedDelta 0.02440506623518217
+Prediction Residual dwMarketProjectedQty 0
+Prediction Residual dwMarketProjectedPrice 0.0
+Prediction Residual ownSellStatusesDynamic List()
+Prediction Residual ownBuyStatusesDynamic List()
+Prediction Residual ownSellStatusesDefault List()
+Prediction Residual ownBuyStatusesDefault Vector(MyScenarioStatus(0.22,1092900), MyScenarioStatus(0.21,1049000), MyScenarioStatus(0.2,1072300), MyScenarioStatus(0.19,1056800), MyScenarioStatus(0.18,1078400))
+Prediction Residual marketSells Vector(MyScenarioStatus(0.26,35400), MyScenarioStatus(0.27,1010800), MyScenarioStatus(0.28,1090100), MyScenarioStatus(0.29,1089600), MyScenarioStatus(0.3,1076800))
+Prediction Residual marketBuys Vector(MyScenarioStatus(0.23,35400), MyScenarioStatus(0.22,1092900), MyScenarioStatus(0.21,1049000), MyScenarioStatus(0.2,1072300), MyScenarioStatus(0.19,1056800))
 
-Vector(
-MyScenarioStatus(0.16,1001900),
-MyScenarioStatus(0.17,1069800),
-MyScenarioStatus(0.18,1058900),
-MyScenarioStatus(0.19,1035400),
-MyScenarioStatus(0.2,1068400)),
-
-Vector(
-MyScenarioStatus(0.13,1079300),
- MyScenarioStatus(0.12,1011700),
- MyScenarioStatus(0.11,1000500),
-MyScenarioStatus(0.1,1078600),
-MyScenarioStatus(0.09,1048500)),
-
-List(),List(),List(),List()))
      */
     val bdOwnBestBidDefault = BigDecimal(
-      ownBuyStatusesDefault.sortWith(_.priceOnMarket < _.priceOnMarket).lastOption.map(_.priceOnMarket).getOrElse(0.0)
+      ownBuyStatusesDefault
+        .sortWith(_.priceOnMarket < _.priceOnMarket)
+        .lastOption
+        .map(_.priceOnMarket)
+        .getOrElse(0.0)
     ).setScale(2, RoundingMode.HALF_EVEN)
     val bdOwnBestAskDefault = BigDecimal(
       ownSellStatusesDefault
@@ -509,23 +487,26 @@ List(),List(),List(),List()))
     ).setScale(2, RoundingMode.HALF_EVEN)
     val qty: Long = {
       val bdOwnBestBid =
-        if (bdOwnBestBidDefault <= bdOwnBestBidDynamic) bdOwnBestBidDynamic else bdOwnBestBidDefault //0
-      val bdOwnBestAsk =
+        if (bdOwnBestBidDefault <= bdOwnBestBidDynamic) bdOwnBestBidDynamic else bdOwnBestBidDefault //0.22
+      val bdOwnBestAsk = {
         if (bdOwnBestAskDefault <= bdOwnBestAskDynamic) bdOwnBestAskDefault else bdOwnBestAskDynamic // max int
-      val sumMktVolBid = marketBuys
+        //Prediction Residual marketBuys Vector(MyScenarioStatus(0.23,35400), MyScenarioStatus(0.22,1092900), MyScenarioStatus(0.21,1049000), MyScenarioStatus(0.2,1072300), MyScenarioStatus(0.19,1056800))
+      }
+      val sumMktVolBid = marketBuys // 35400
         .filter(p => {
-          p.priceOnMarket > bdOwnBestBid || p.priceOnMarket == 0.0
+          p.priceOnMarket > bdOwnBestBid || p.priceOnMarket == 0.0 //|| (dwMarketProjectedPrice != 0.0 || dwMarketProjectedQty != 0)
         })
         .map(_.qtyOnMarketL)
         .sum
+      // Prediction Residual marketSells Vector(MyScenarioStatus(0.26,35400), MyScenarioStatus(0.27,1010800), MyScenarioStatus(0.28,1090100), MyScenarioStatus(0.29,1089600), MyScenarioStatus(0.3,1076800))
       val sumMktVolAsk = marketSells
         .filter(p => {
-          p.priceOnMarket < bdOwnBestAsk || p.priceOnMarket == 0.0
+          p.priceOnMarket < bdOwnBestAsk || p.priceOnMarket == 0.0 //|| (dwMarketProjectedPrice != 0.0 || dwMarketProjectedQty != 0)
         })
         .map(_.qtyOnMarketL)
         .sum
-      if (bdOwnBestBid >= dwMarketProjectedPrice) { //Matched Buy
-        (dwMarketProjectedQty - sumMktVolBid) * -1
+      if (bdOwnBestBid >= dwMarketProjectedPrice) {        //Matched Buy
+        (dwMarketProjectedQty - sumMktVolBid) * -1         // 35400
       } else if (bdOwnBestAsk <= dwMarketProjectedPrice) { //Matched Sell
         dwMarketProjectedQty - sumMktVolAsk
       } else {
