@@ -444,23 +444,10 @@ object Algo {
     log(s"Prediction Residual ownSellStatusesDefault $ownSellStatusesDefault")
     log(s"Prediction Residual ownBuyStatusesDynamic $ownBuyStatusesDynamic")
     log(s"Prediction Residual ownSellStatusesDynamic $ownSellStatusesDynamic")
-//    log(s"Prediction Residual ownSellStatusesDynamic $ownSellStatusesDynamic")
     log(s"Prediction Residual dwMarketProjectedPrice $dwMarketProjectedPrice")
     log(s"Prediction Residual dwMarketProjectedQty $dwMarketProjectedQty")
     log(s"Prediction Residual signedDelta $signedDelta")
 
-    /*
-Prediction Residual signedDelta 0.02440506623518217
-Prediction Residual dwMarketProjectedQty 0
-Prediction Residual dwMarketProjectedPrice 0.0
-Prediction Residual ownSellStatusesDynamic List()
-Prediction Residual ownBuyStatusesDynamic List()
-Prediction Residual ownSellStatusesDefault List()
-Prediction Residual ownBuyStatusesDefault Vector(MyScenarioStatus(0.22,1092900), MyScenarioStatus(0.21,1049000), MyScenarioStatus(0.2,1072300), MyScenarioStatus(0.19,1056800), MyScenarioStatus(0.18,1078400))
-Prediction Residual marketSells Vector(MyScenarioStatus(0.26,35400), MyScenarioStatus(0.27,1010800), MyScenarioStatus(0.28,1090100), MyScenarioStatus(0.29,1089600), MyScenarioStatus(0.3,1076800))
-Prediction Residual marketBuys Vector(MyScenarioStatus(0.23,35400), MyScenarioStatus(0.22,1092900), MyScenarioStatus(0.21,1049000), MyScenarioStatus(0.2,1072300), MyScenarioStatus(0.19,1056800))
-
-     */
     val bdOwnBestBidDefault = BigDecimal(
       ownBuyStatusesDefault
         .sortWith(_.priceOnMarket < _.priceOnMarket)
@@ -485,34 +472,47 @@ Prediction Residual marketBuys Vector(MyScenarioStatus(0.23,35400), MyScenarioSt
         .map(_.priceOnMarket)
         .getOrElse(Int.MaxValue.toDouble)
     ).setScale(2, RoundingMode.HALF_EVEN)
-    val qty: Long = {
-      val bdOwnBestBid =
-        if (bdOwnBestBidDefault <= bdOwnBestBidDynamic) bdOwnBestBidDynamic else bdOwnBestBidDefault //0.22
-      val bdOwnBestAsk = {
-        if (bdOwnBestAskDefault <= bdOwnBestAskDynamic) bdOwnBestAskDefault else bdOwnBestAskDynamic // max int
-        //Prediction Residual marketBuys Vector(MyScenarioStatus(0.23,35400), MyScenarioStatus(0.22,1092900), MyScenarioStatus(0.21,1049000), MyScenarioStatus(0.2,1072300), MyScenarioStatus(0.19,1056800))
-      }
-      val sumMktVolBid = marketBuys // 35400
-        .filter(p => {
-          p.priceOnMarket > bdOwnBestBid || p.priceOnMarket == 0.0 //|| (dwMarketProjectedPrice != 0.0 || dwMarketProjectedQty != 0)
-        })
-        .map(_.qtyOnMarketL)
-        .sum
-      // Prediction Residual marketSells Vector(MyScenarioStatus(0.26,35400), MyScenarioStatus(0.27,1010800), MyScenarioStatus(0.28,1090100), MyScenarioStatus(0.29,1089600), MyScenarioStatus(0.3,1076800))
-      val sumMktVolAsk = marketSells
-        .filter(p => {
-          p.priceOnMarket < bdOwnBestAsk || p.priceOnMarket == 0.0 //|| (dwMarketProjectedPrice != 0.0 || dwMarketProjectedQty != 0)
-        })
-        .map(_.qtyOnMarketL)
-        .sum
-      if (bdOwnBestBid >= dwMarketProjectedPrice) {        //Matched Buy
-        (dwMarketProjectedQty - sumMktVolBid) * -1         // 35400
-      } else if (bdOwnBestAsk <= dwMarketProjectedPrice) { //Matched Sell
-        dwMarketProjectedQty - sumMktVolAsk
-      } else {
-        0
-      }
+    val bdOwnBestBid =
+      if (bdOwnBestBidDefault <= bdOwnBestBidDynamic) bdOwnBestBidDynamic else bdOwnBestBidDefault
+    val bdOwnBestAsk = {
+      if (bdOwnBestAskDefault <= bdOwnBestAskDynamic) bdOwnBestAskDefault else bdOwnBestAskDynamic
     }
+    val qty =
+      if (bdOwnBestBid < dwMarketProjectedPrice && dwMarketProjectedPrice < bdOwnBestAsk) {
+        0
+      } else if (bdOwnBestBid >= dwMarketProjectedPrice) {
+        val sumCliQuanBuy = marketBuys
+          .filter(p => {
+            p.priceOnMarket >= dwMarketProjectedPrice || p.priceOnMarket == 0.0
+          })
+          .map(_.qtyOnMarketL)
+          .sum -
+          (ownBuyStatusesDefault
+            .filter(p => p.priceOnMarket >= dwMarketProjectedPrice || p.priceOnMarket == 0.0)
+            .map(_.qtyOnMarketL)
+            .sum +
+            ownBuyStatusesDynamic
+              .filter(p => p.priceOnMarket >= dwMarketProjectedPrice || p.priceOnMarket == 0.0)
+              .map(_.qtyOnMarketL)
+              .sum)
+        if (sumCliQuanBuy >= dwMarketProjectedQty) 0 else (dwMarketProjectedQty - sumCliQuanBuy) * -1
+      } else {
+        val sumCliQuanSell = marketSells
+          .filter(p => {
+            p.priceOnMarket <= dwMarketProjectedPrice || p.priceOnMarket == 0.0
+          })
+          .map(_.qtyOnMarketL)
+          .sum -
+          (ownSellStatusesDefault
+            .filter(p => p.priceOnMarket <= dwMarketProjectedPrice || p.priceOnMarket == 0.0)
+            .map(_.qtyOnMarketL)
+            .sum +
+            ownSellStatusesDynamic
+              .filter(p => p.priceOnMarket <= dwMarketProjectedPrice || p.priceOnMarket == 0.0)
+              .map(_.qtyOnMarketL)
+              .sum)
+        if (sumCliQuanSell >= dwMarketProjectedQty) 0 else dwMarketProjectedQty - sumCliQuanSell
+      }
     // CALL dw buy, order is positive , delta is positive, buy dw-> sell ul
     // PUT dw, buy, order is positive, delta is negative, buy dw -> buy ul
     // CALL dw sell, order is negative, delta is positive, sell dw -> buy ul
