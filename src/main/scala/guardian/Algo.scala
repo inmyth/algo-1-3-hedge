@@ -511,11 +511,11 @@ object Algo {
               .filter(p => p.priceOnMarket <= dwMarketProjectedPrice || p.priceOnMarket == 0.0)
               .map(_.qtyOnMarketL)
               .sum)
-        if (sumCliQuanSell >= dwMarketProjectedQty) 0 else dwMarketProjectedQty - sumCliQuanSell
+        if (sumCliQuanSell >= dwMarketProjectedQty) 0 else (dwMarketProjectedQty - sumCliQuanSell)
       }
     // CALL dw buy, order is positive , delta is positive, buy dw-> sell ul
-    // PUT dw, buy, order is positive, delta is negative, buy dw -> buy ul
     // CALL dw sell, order is negative, delta is positive, sell dw -> buy ul
+    // PUT dw, buy, order is positive, delta is negative, buy dw -> buy ul
     // PUT dw sell, order is negative, delta is negative, sell dw -> sell ul
     BigDecimal(qty * signedDelta)
       .setScale(0, RoundingMode.HALF_EVEN)
