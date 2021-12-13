@@ -3,7 +3,6 @@ package guardian
 import cats.data.EitherT
 import cats.implicits._
 import cats.{Applicative, Monad}
-import com.hsoft.scenario.status.ScenarioStatus
 import com.ingalys.imc.BuySell
 import com.ingalys.imc.order.Order
 import guardian.Algo._
@@ -24,7 +23,6 @@ class Algo[F[_]: Applicative: Monad](
     val pendingCalculationRepo: PendingCalculationAlgebra[F],
     underlyingSymbol: String,
     lotSize: Int,
-    sendOrder: OrderAction => Order,
     logAlert: String => Unit,
     logInfo: String => Unit,
     logError: String => Unit
@@ -255,7 +253,7 @@ class Algo[F[_]: Applicative: Monad](
     } yield ()
 
   // called everytime ul price changes
-  def handleOnSignal(preProcess: EitherT[F, Error, Order]): F[Either[Error, Unit]] =
+  def handleOnSignal(preProcess: EitherT[F, Error, Order]): F[Either[Error, List[OrderAction]]] =
     (for {
       _ <- checkAndUpdatePendingOrderAndCalculation()
       a <- EitherT.right[Error](process(preProcess))
@@ -268,17 +266,18 @@ class Algo[F[_]: Applicative: Monad](
         case l @ UpdateOrder(_, _) => pendingOrdersRepo.putImmediate(l)
         case l @ CancelOrder(_, _) => pendingOrdersRepo.putImmediate(l)
       }.sequence)
-      _ <- EitherT.right[Error](
+      g <- EitherT.rightT[F, Error](
         a.filterNot(p => p.isInstanceOf[InsertOrder] && p.asInstanceOf[InsertOrder].urgency == SendingUrgency.Later)
-          .map(p => sendOrder(p).pure[F])
-          .sequence
+//          .map(p => sendOrder(p).pure[F])
+//          .sequence
       )
-    } yield ()).value.map {
-      case Right(_) => Right(())
-      case Left(e) =>
-        logAlert(e.msg)
-        Left(e)
-    }
+    } yield g).value
+//      .map {
+//      case Right(_) => Right(())
+//      case Left(e) =>
+//        logAlert(e.msg)
+//        Left(e)
+//    }
 
   def convertToOrder(a: ActiveOrderDescriptorView, sentOrder: Order, underlyingOrderCustomId: CustomId): Order = {
     val newOrder = new Order()
@@ -293,7 +292,7 @@ class Algo[F[_]: Applicative: Monad](
   def handleOnOrderAck(
       activeOrderDescriptorView: ActiveOrderDescriptorView,
       preProcess: EitherT[F, Error, Order]
-  ): EitherT[F, Error, Unit] =
+  ): EitherT[F, Error, List[OrderAction]] =
     for {
       sentOrder <- EitherT.rightT[F, Error](activeOrderDescriptorView.getOrderCopy)
       customId = CustomId.fromOrder(sentOrder)
@@ -303,29 +302,29 @@ class Algo[F[_]: Applicative: Monad](
       _                <- EitherT.right[Error](pendingOrdersRepo.removeImmediate(customId))
       isImmediateEmpty <- EitherT.right[Error](pendingOrdersRepo.isImmediateEmpty)
       isLaterEmpty     <- EitherT.right[Error](pendingOrdersRepo.isLaterEmpty)
-      _ <- (isImmediateEmpty, isLaterEmpty) match {
+      ots <- (isImmediateEmpty, isLaterEmpty) match {
         case (true, true)   => processSignal(preProcess)
-        case (true, false)  => processPendingLater()
-        case (false, true)  => EitherT.rightT[F, Error](())
-        case (false, false) => EitherT.rightT[F, Error](())
+        case (true, false)  => processPendingLater().map(p => List(p))
+        case (false, true)  => EitherT.rightT[F, Error](List.empty)
+        case (false, false) => EitherT.rightT[F, Error](List.empty)
       }
-    } yield ()
+    } yield ots
 
-  def processPendingLater(): EitherT[F, Error, Unit] =
+  def processPendingLater(): EitherT[F, Error, OrderAction] =
     for {
       a <- EitherT.right[Error](pendingOrdersRepo.getLater)
       b <- EitherT.rightT[F, Error](OrderAction.InsertOrder(a.order, SendingUrgency.Immediate))
       _ <- EitherT.right[Error](pendingOrdersRepo.putImmediate(b))
       _ <- EitherT.right[Error](pendingOrdersRepo.clearLater())
-      _ <- EitherT.right[Error](sendOrder(b).pure[F])
-    } yield ()
+//      _ <- EitherT.right[Error](sendOrder(b).pure[F])
+    } yield b
 
-  def processSignal(preProcess: EitherT[F, Error, Order]): EitherT[F, Error, Unit] =
+  def processSignal(preProcess: EitherT[F, Error, Order]): EitherT[F, Error, List[OrderAction]] =
     for {
       d <- EitherT.right[Error](pendingCalculationRepo.shouldRecalculate)
       _ <- EitherT.right[Error](pendingCalculationRepo.deactivate())
-      _ <- if (d) EitherT(handleOnSignal(preProcess)) else EitherT.rightT[F, Error](())
-    } yield ()
+      f <- if (d) EitherT(handleOnSignal(preProcess)) else EitherT.rightT[F, Error](List.empty)
+    } yield f
 
   def handleOnOrderNak(
       customId: CustomId,
@@ -343,7 +342,6 @@ object Algo {
   def apply[F[_]: Applicative: Monad](
       underlyingSymbol: String,
       lotSize: Int,
-      sendOrder: OrderAction => Order,
       logAlert: String => Unit,
       logInfo: String => Unit,
       logError: String => Unit
@@ -355,7 +353,6 @@ object Algo {
       pendingCalculationRepo = new PendingCalculationInMemInterpreter[F],
       underlyingSymbol = underlyingSymbol,
       lotSize = lotSize,
-      sendOrder = sendOrder,
       logAlert = logAlert,
       logInfo = logInfo,
       logError = logError
@@ -410,7 +407,7 @@ object Algo {
     if (refPrice == x._1 && !isUp) x._2 else x._3
   }
 
-  case class MyScenarioStatus(priceOnMarket: Double, qtyOnMarketL: Long)
+  case class MyScenarioStatus(priceOnMarket: BigDecimal, qtyOnMarketL: Long)
 
   case class DW(
       uniqueId: String,
@@ -448,35 +445,40 @@ object Algo {
     log(s"Prediction Residual dwMarketProjectedQty $dwMarketProjectedQty")
     log(s"Prediction Residual signedDelta $signedDelta")
 
-    val bdOwnBestBidDefault = BigDecimal(
+    val bdOwnBestBidDefault =
       ownBuyStatusesDefault
         .sortWith(_.priceOnMarket < _.priceOnMarket)
         .lastOption
         .map(_.priceOnMarket)
-        .getOrElse(0.0)
-    ).setScale(2, RoundingMode.HALF_EVEN)
-    val bdOwnBestAskDefault = BigDecimal(
+        .getOrElse(BigDecimal("0"))
+
+    val bdOwnBestAskDefault =
       ownSellStatusesDefault
         .sortWith(_.priceOnMarket < _.priceOnMarket)
         .headOption
         .map(_.priceOnMarket)
-        .getOrElse(Int.MaxValue.toDouble) // 2147483647
-    ).setScale(2, RoundingMode.HALF_EVEN)
-    val bdOwnBestBidDynamic = BigDecimal(
-      ownBuyStatusesDynamic.sortWith(_.priceOnMarket < _.priceOnMarket).lastOption.map(_.priceOnMarket).getOrElse(0.0)
-    ).setScale(2, RoundingMode.HALF_EVEN)
-    val bdOwnBestAskDynamic = BigDecimal(
+        .getOrElse(BigDecimal(Int.MaxValue.toDouble))
+
+    val bdOwnBestBidDynamic =
+      ownBuyStatusesDynamic
+        .sortWith(_.priceOnMarket < _.priceOnMarket)
+        .lastOption
+        .map(_.priceOnMarket)
+        .getOrElse(BigDecimal("0"))
+
+    val bdOwnBestAskDynamic =
       ownSellStatusesDynamic
         .sortWith(_.priceOnMarket < _.priceOnMarket)
         .headOption
         .map(_.priceOnMarket)
-        .getOrElse(Int.MaxValue.toDouble)
-    ).setScale(2, RoundingMode.HALF_EVEN)
+        .getOrElse(BigDecimal(Int.MaxValue.toDouble))
+
     val bdOwnBestBid =
       if (bdOwnBestBidDefault <= bdOwnBestBidDynamic) bdOwnBestBidDynamic else bdOwnBestBidDefault
-    val bdOwnBestAsk = {
+
+    val bdOwnBestAsk =
       if (bdOwnBestAskDefault <= bdOwnBestAskDynamic) bdOwnBestAskDefault else bdOwnBestAskDynamic
-    }
+
     val qty =
       if (bdOwnBestBid < dwMarketProjectedPrice && dwMarketProjectedPrice < bdOwnBestAsk) {
         0
@@ -511,7 +513,7 @@ object Algo {
               .filter(p => p.priceOnMarket <= dwMarketProjectedPrice || p.priceOnMarket == 0.0)
               .map(_.qtyOnMarketL)
               .sum)
-        if (sumCliQuanSell >= dwMarketProjectedQty) 0 else (dwMarketProjectedQty - sumCliQuanSell)
+        if (sumCliQuanSell >= dwMarketProjectedQty) 0 else dwMarketProjectedQty - sumCliQuanSell
       }
     // CALL dw buy, order is positive , delta is positive, buy dw-> sell ul
     // CALL dw sell, order is negative, delta is positive, sell dw -> buy ul

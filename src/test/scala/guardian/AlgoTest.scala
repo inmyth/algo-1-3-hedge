@@ -29,7 +29,6 @@ class AlgoTest extends AnyWordSpec with Matchers {
       pendingCalculationRepo = new PendingCalculationInMemInterpreter[F],
       underlyingSymbol = symbol,
       lotSize = lotSize,
-      sendOrder = (_: OrderAction) => liveBuyOrders.head,
       logAlert = (s: String) => println(s),
       logInfo = (s: String) => println(s),
       logError = (s: String) => println(s)

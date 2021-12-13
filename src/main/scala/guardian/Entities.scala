@@ -3,7 +3,7 @@ package guardian
 import com.ingalys.imc.order.Order
 import horizontrader.services.collectors.persistent.ActiveOrderDescriptorView
 
-import java.util.UUID
+import scala.util.Random
 
 object Entities {
 
@@ -37,7 +37,7 @@ object Entities {
   case class CustomId(v: String)
   object CustomId {
     val field: Int                    = 14
-    def generate: CustomId            = CustomId(UUID.randomUUID().toString)
+    def generate: CustomId            = CustomId(Random.alphanumeric.take(15).mkString(""))
     def fromOrder(o: Order): CustomId = new CustomId(o.getCustomField(field).toString)
   }
 
