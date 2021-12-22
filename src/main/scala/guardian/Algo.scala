@@ -214,7 +214,7 @@ class Algo[F[_]: Applicative: Monad](
       b <- EitherT.rightT[F, Error](cloneModifyOrder(a, roundQtyByLotSize(a.getQuantityL), a.getPrice, a.getBuySell))
       _ = logInfo(s"Algo 0. Start algo. Order with qty rounded: ${b.getQuantityL}")
       c <- EitherT.right(liveOrdersRepo.getOrdersByTimeSortedDown(underlyingSymbol))
-      _ = logInfo(s"Algo 1. Live orders: $c")
+//      _ = logInfo(s"Algo 1. Live orders: $c")
       d <- EitherT.right[Error](createOrderActions(b, c))
       e <- EitherT.rightT[F, Error](updatePrice(a.getPrice, c, d))
       f <- EitherT.right[Error](e.map(roundOrderActionByLotSize(_).pure[F]).sequence)
@@ -268,16 +268,8 @@ class Algo[F[_]: Applicative: Monad](
       }.sequence)
       g <- EitherT.rightT[F, Error](
         a.filterNot(p => p.isInstanceOf[InsertOrder] && p.asInstanceOf[InsertOrder].urgency == SendingUrgency.Later)
-//          .map(p => sendOrder(p).pure[F])
-//          .sequence
       )
     } yield g).value
-//      .map {
-//      case Right(_) => Right(())
-//      case Left(e) =>
-//        logAlert(e.msg)
-//        Left(e)
-//    }
 
   def convertToOrder(a: ActiveOrderDescriptorView, sentOrder: Order, underlyingOrderCustomId: CustomId): Order = {
     val newOrder = new Order()
@@ -435,15 +427,15 @@ object Algo {
       signedDelta: Double,
       log: String => Unit
   ): Long = {
-    log(s"Prediction Residual marketBuys $marketBuys")
-    log(s"Prediction Residual marketSells $marketSells")
-    log(s"Prediction Residual ownBuyStatusesDefault $ownBuyStatusesDefault")
-    log(s"Prediction Residual ownSellStatusesDefault $ownSellStatusesDefault")
-    log(s"Prediction Residual ownBuyStatusesDynamic $ownBuyStatusesDynamic")
-    log(s"Prediction Residual ownSellStatusesDynamic $ownSellStatusesDynamic")
-    log(s"Prediction Residual dwMarketProjectedPrice $dwMarketProjectedPrice")
-    log(s"Prediction Residual dwMarketProjectedQty $dwMarketProjectedQty")
-    log(s"Prediction Residual signedDelta $signedDelta")
+//    log(s"Prediction Residual marketBuys $marketBuys")
+//    log(s"Prediction Residual marketSells $marketSells")
+//    log(s"Prediction Residual ownBuyStatusesDefault $ownBuyStatusesDefault")
+//    log(s"Prediction Residual ownSellStatusesDefault $ownSellStatusesDefault")
+//    log(s"Prediction Residual ownBuyStatusesDynamic $ownBuyStatusesDynamic")
+//    log(s"Prediction Residual ownSellStatusesDynamic $ownSellStatusesDynamic")
+//    log(s"Prediction Residual dwMarketProjectedPrice $dwMarketProjectedPrice")
+//    log(s"Prediction Residual dwMarketProjectedQty $dwMarketProjectedQty")
+//    log(s"Prediction Residual signedDelta $signedDelta")
 
     val bdOwnBestBidDefault =
       ownBuyStatusesDefault
