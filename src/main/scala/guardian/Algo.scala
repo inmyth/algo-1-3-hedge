@@ -477,32 +477,32 @@ object Algo {
       } else if (bdOwnBestBid >= dwMarketProjectedPrice) {
         val sumCliQuanBuy = marketBuys
           .filter(p => {
-            p.priceOnMarket >= dwMarketProjectedPrice || p.priceOnMarket == 0.0
+            p.priceOnMarket >= dwMarketProjectedPrice || p.priceOnMarket == BigDecimal("0")
           })
           .map(_.qtyOnMarketL)
           .sum -
           (ownBuyStatusesDefault
-            .filter(p => p.priceOnMarket >= dwMarketProjectedPrice || p.priceOnMarket == 0.0)
+            .filter(p => p.priceOnMarket >= dwMarketProjectedPrice || p.priceOnMarket == BigDecimal("0"))
             .map(_.qtyOnMarketL)
             .sum +
             ownBuyStatusesDynamic
-              .filter(p => p.priceOnMarket >= dwMarketProjectedPrice || p.priceOnMarket == 0.0)
+              .filter(p => p.priceOnMarket >= dwMarketProjectedPrice || p.priceOnMarket == BigDecimal("0"))
               .map(_.qtyOnMarketL)
               .sum)
         if (sumCliQuanBuy >= dwMarketProjectedQty) 0 else (dwMarketProjectedQty - sumCliQuanBuy) * -1
       } else {
         val sumCliQuanSell = marketSells
           .filter(p => {
-            p.priceOnMarket <= dwMarketProjectedPrice || p.priceOnMarket == 0.0
+            p.priceOnMarket <= dwMarketProjectedPrice || p.priceOnMarket == BigDecimal("0")
           })
           .map(_.qtyOnMarketL)
           .sum -
           (ownSellStatusesDefault
-            .filter(p => p.priceOnMarket <= dwMarketProjectedPrice || p.priceOnMarket == 0.0)
+            .filter(p => p.priceOnMarket <= dwMarketProjectedPrice || p.priceOnMarket == BigDecimal("0"))
             .map(_.qtyOnMarketL)
             .sum +
             ownSellStatusesDynamic
-              .filter(p => p.priceOnMarket <= dwMarketProjectedPrice || p.priceOnMarket == 0.0)
+              .filter(p => p.priceOnMarket <= dwMarketProjectedPrice || p.priceOnMarket == BigDecimal("0"))
               .map(_.qtyOnMarketL)
               .sum)
         if (sumCliQuanSell >= dwMarketProjectedQty) 0 else dwMarketProjectedQty - sumCliQuanSell
