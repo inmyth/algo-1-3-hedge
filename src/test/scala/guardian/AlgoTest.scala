@@ -232,32 +232,32 @@ class AlgoTest extends AnyWordSpec with Matchers {
         x shouldBe Left(Error.PendingError)
       }
     }
-    "return Right" when {
-      "pending orders are empty" in {
-        val x = for {
-          a <- createApp[Id]().pure[Id]
-          c <- a.handleOnSignal(EitherT.fromEither(rawOrderBuy.asRight[Error]))
-        } yield c
-        x shouldBe Right(())
-      }
-    }
+//    "return Right" when {
+//      "pending orders are empty" in {
+//        val x = for {
+//          a <- createApp[Id]().pure[Id]
+//          c <- a.handleOnSignal(EitherT.fromEither(rawOrderBuy.asRight[Error]))
+//        } yield c
+//        x shouldBe Right(())
+//      }
+//    }
   }
 
-  "handleOnOrderAck" should {
-    "return Right" when {
-      "order exists in the pending repo" in {
-        val x = for {
-          a <- createApp[Id]().pure[Id]
-          _ <- a.pendingOrdersRepo.putImmediate(InsertOrder(rawOrderBuy, SendingUrgency.Immediate))
-          c = a.handleOnOrderAck(
-            createActiveOrderDescriptorView(rawOrderBuy),
-            EitherT.fromEither(rawOrderBuy.asRight[Error])
-          )
-        } yield c
-        x.value shouldBe Right(())
-      }
-    }
-  }
+//  "handleOnOrderAck" should {
+//    "return Right" when {
+//      "order exists in the pending repo" in {
+//        val x = for {
+//          a <- createApp[Id]().pure[Id]
+//          _ <- a.pendingOrdersRepo.putImmediate(InsertOrder(rawOrderBuy, SendingUrgency.Immediate))
+//          c = a.handleOnOrderAck(
+//            createActiveOrderDescriptorView(rawOrderBuy),
+//            EitherT.fromEither(rawOrderBuy.asRight[Error])
+//          )
+//        } yield c
+//        x.value shouldBe Right(())
+//      }
+//    }
+//  }
 
   "getPriceAfterTicks" should {
     "return 32 when price is 30.75 ticked down 5 steps" in {
@@ -273,22 +273,55 @@ class AlgoTest extends AnyWordSpec with Matchers {
       Algo.getPriceAfterTicks(false, BigDecimal(99.50), 5) shouldBe 98.25
     }
   }
-//  "predictResidual" when {
-//    "dwProjPx matches on Buy" should {
-//      "return sell order" in {
-//        Algo
-//          .predictResidual(
-//            marketBuys = dw.marketBuys,
-//            marketSells = dw.marketSells,
-//            ownBuyStatusesDefault = dw.ownBuyStatusesDefault,
-//            ownSellStatusesDefault = dw.ownSellStatusesDefault,
-//            ownBuyStatusesDynamic = dw.ownBuyStatusesDynamic,
-//            ownSellStatusesDynamic = dw.ownSellStatusesDynamic,
-//            dwMarketProjectedPrice = dw.projectedPrice.get,
-//            dwMarketProjectedQty = dw.projectedVol.get,
-//            signedDelta = dw.delta.get
-//          ) shouldBe -668L
-//      }
-//    }
-//  }
+  "predictResidual" when {
+    "these conditions" should {
+      "return the right amount" in {
+        val marketSells = Vector(
+          MyScenarioStatus(0.0, 298000),
+          MyScenarioStatus(0.17, 1218400),
+          MyScenarioStatus(0.18, 2357000),
+          MyScenarioStatus(0.19, 1123400),
+          MyScenarioStatus(0.2, 3091400)
+        )
+        val marketBuys = Vector(
+          MyScenarioStatus(0.16, 423800),
+          MyScenarioStatus(0.15, 2265400),
+          MyScenarioStatus(0.14, 1046500),
+          MyScenarioStatus(0.13, 1031800),
+          MyScenarioStatus(0.12, 1073300)
+        )
+        val defaultSells = Vector(
+          MyScenarioStatus(0.18, 1036200),
+          MyScenarioStatus(0.19, 1053300),
+          MyScenarioStatus(0.20, 1091400),
+          MyScenarioStatus(0.21, 1006900),
+          MyScenarioStatus(0.17, 1001200)
+        )
+        val defaultBuys = Vector(
+          MyScenarioStatus(0.14, 1046500),
+          MyScenarioStatus(0.13, 1031800),
+          MyScenarioStatus(0.12, 1073300),
+          MyScenarioStatus(0.11, 1048100),
+          MyScenarioStatus(0.15, 1000100)
+        )
+        val dynamicSells           = Vector(MyScenarioStatus(0.17, 200000))
+        val dynamicBuys            = Vector(MyScenarioStatus(0.15, 423800), MyScenarioStatus(0.16, 423800))
+        val dwMarketProjectedPrice = 0.16
+        val dwMarketProjectedQty   = 298000
+        val signedDelta            = 0.02401122463304896
+        Algo.predictResidual(
+          marketBuys = marketBuys,
+          marketSells = marketSells,
+          ownBuyStatusesDefault = defaultBuys,
+          ownSellStatusesDefault = defaultSells,
+          ownBuyStatusesDynamic = dynamicBuys,
+          ownSellStatusesDynamic = dynamicSells,
+          dwMarketProjectedPrice = dwMarketProjectedPrice,
+          dwMarketProjectedQty = dwMarketProjectedQty,
+          signedDelta = signedDelta,
+          log = (s: String) => println(s)
+        ) shouldBe (-1 * dwMarketProjectedQty * signedDelta).toInt
+      }
+    }
+  }
 }

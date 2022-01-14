@@ -27,6 +27,7 @@ class Algo[F[_]: Applicative: Monad](
     logInfo: String => Unit,
     logError: String => Unit
 ) {
+
   def createOrderActions(order: Order, liveOrders: List[RepoOrder]): F[List[OrderAction]] =
     for {
       liveQty <- Monad[F].pure(calcTotalQty(liveOrders.map(_.order)))
@@ -331,6 +332,7 @@ class Algo[F[_]: Applicative: Monad](
 }
 
 object Algo {
+  val zero = BigDecimal("0")
   def apply[F[_]: Applicative: Monad](
       underlyingSymbol: String,
       lotSize: Int,
@@ -386,7 +388,7 @@ object Algo {
   def SETChkSpread(refPrice: BigDecimal, isUp: Boolean): Double = {
     val c: List[(BigDecimal, Double, Double)] =
       List(
-        (BigDecimal("0"), 0.0, 0.01),
+        (zero, 0.0, 0.01),
         (BigDecimal("2"), 0.01, 0.02),
         (BigDecimal("5"), 0.02, 0.05),
         (BigDecimal("10"), 0.05, 0.1),
@@ -436,28 +438,24 @@ object Algo {
 //    log(s"Prediction Residual dwMarketProjectedPrice $dwMarketProjectedPrice")
 //    log(s"Prediction Residual dwMarketProjectedQty $dwMarketProjectedQty")
 //    log(s"Prediction Residual signedDelta $signedDelta")
-
     val bdOwnBestBidDefault =
       ownBuyStatusesDefault
         .sortWith(_.priceOnMarket < _.priceOnMarket)
         .lastOption
         .map(_.priceOnMarket)
-        .getOrElse(BigDecimal("0"))
-
+        .getOrElse(zero)
     val bdOwnBestAskDefault =
       ownSellStatusesDefault
         .sortWith(_.priceOnMarket < _.priceOnMarket)
         .headOption
         .map(_.priceOnMarket)
         .getOrElse(BigDecimal(Int.MaxValue.toDouble))
-
     val bdOwnBestBidDynamic =
       ownBuyStatusesDynamic
         .sortWith(_.priceOnMarket < _.priceOnMarket)
         .lastOption
         .map(_.priceOnMarket)
-        .getOrElse(BigDecimal("0"))
-
+        .getOrElse(zero)
     val bdOwnBestAskDynamic =
       ownSellStatusesDynamic
         .sortWith(_.priceOnMarket < _.priceOnMarket)
@@ -467,42 +465,44 @@ object Algo {
 
     val bdOwnBestBid =
       if (bdOwnBestBidDefault <= bdOwnBestBidDynamic) bdOwnBestBidDynamic else bdOwnBestBidDefault
-
     val bdOwnBestAsk =
       if (bdOwnBestAskDefault <= bdOwnBestAskDynamic) bdOwnBestAskDefault else bdOwnBestAskDynamic
-
     val qty =
       if (bdOwnBestBid < dwMarketProjectedPrice && dwMarketProjectedPrice < bdOwnBestAsk) {
         0
       } else if (bdOwnBestBid >= dwMarketProjectedPrice) {
         val sumCliQuanBuy = marketBuys
           .filter(p => {
-            p.priceOnMarket >= dwMarketProjectedPrice || p.priceOnMarket == BigDecimal("0")
+            p.priceOnMarket >= dwMarketProjectedPrice || p.priceOnMarket == zero
           })
           .map(_.qtyOnMarketL)
           .sum -
           (ownBuyStatusesDefault
-            .filter(p => p.priceOnMarket >= dwMarketProjectedPrice || p.priceOnMarket == BigDecimal("0"))
+            .filter(p => marketBuys.exists(q => q.priceOnMarket == p.priceOnMarket))
+            .filter(p => p.priceOnMarket >= dwMarketProjectedPrice || p.priceOnMarket == zero)
             .map(_.qtyOnMarketL)
             .sum +
             ownBuyStatusesDynamic
-              .filter(p => p.priceOnMarket >= dwMarketProjectedPrice || p.priceOnMarket == BigDecimal("0"))
+              .filter(p => marketBuys.exists(q => q.priceOnMarket == p.priceOnMarket))
+              .filter(p => p.priceOnMarket >= dwMarketProjectedPrice || p.priceOnMarket == zero)
               .map(_.qtyOnMarketL)
               .sum)
         if (sumCliQuanBuy >= dwMarketProjectedQty) 0 else (dwMarketProjectedQty - sumCliQuanBuy) * -1
       } else {
         val sumCliQuanSell = marketSells
           .filter(p => {
-            p.priceOnMarket <= dwMarketProjectedPrice || p.priceOnMarket == BigDecimal("0")
+            p.priceOnMarket <= dwMarketProjectedPrice || p.priceOnMarket == zero
           })
           .map(_.qtyOnMarketL)
           .sum -
           (ownSellStatusesDefault
-            .filter(p => p.priceOnMarket <= dwMarketProjectedPrice || p.priceOnMarket == BigDecimal("0"))
+            .filter(p => marketSells.exists(q => q.priceOnMarket == p.priceOnMarket))
+            .filter(p => p.priceOnMarket <= dwMarketProjectedPrice || p.priceOnMarket == zero)
             .map(_.qtyOnMarketL)
             .sum +
             ownSellStatusesDynamic
-              .filter(p => p.priceOnMarket <= dwMarketProjectedPrice || p.priceOnMarket == BigDecimal("0"))
+              .filter(p => marketSells.exists(q => q.priceOnMarket == p.priceOnMarket))
+              .filter(p => p.priceOnMarket <= dwMarketProjectedPrice || p.priceOnMarket == zero)
               .map(_.qtyOnMarketL)
               .sum)
         if (sumCliQuanSell >= dwMarketProjectedQty) 0 else dwMarketProjectedQty - sumCliQuanSell
@@ -511,7 +511,9 @@ object Algo {
     // CALL dw sell, order is negative, delta is positive, sell dw -> buy ul
     // PUT dw, buy, order is positive, delta is negative, buy dw -> buy ul
     // PUT dw sell, order is negative, delta is negative, sell dw -> sell ul
-    BigDecimal(qty * signedDelta)
+    val sign = if (qty < 0) -1 else 1
+    val xqty = if (Math.abs(qty) > dwMarketProjectedQty) dwMarketProjectedQty * sign else qty
+    BigDecimal(xqty * signedDelta)
       .setScale(0, RoundingMode.HALF_EVEN)
       .toLong // positive = buy ul, negative = sell ul
   }
